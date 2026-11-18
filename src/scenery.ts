@@ -29,6 +29,8 @@ import type { Rail } from './rail';
 import { gabledRoof } from './roof.ts';
 import type { GabledRoof } from './roof.ts';
 import { blendExposedRock, civilTexture } from './scenery-materials.ts';
+import { decorrelateWaterNormals } from './water-reflection.ts';
+import type { WaterReflection } from './water-reflection.ts';
 import { createVegetation } from './vegetation.ts';
 import type { VegetationOptions } from './vegetation.ts';
 import { createPassengers } from './passengers.ts';
@@ -1683,7 +1685,8 @@ function contours(data: WorldData, points: LocalPoint[]) {
   return result;
 }
 
-function addWater(group: Group, data: WorldData, surface: MeshStandardMaterial, polished = false) {
+function addWater(group: Group, data: WorldData, surface: MeshStandardMaterial, polished: boolean, reflection?: WaterReflection) {
+  const released: (() => void)[] = [];
   for (const feature of data.features) {
     if (feature.type !== 'water') continue;
     const outline = contours(data, polygon(feature.points));
@@ -1723,7 +1726,9 @@ function addWater(group: Group, data: WorldData, surface: MeshStandardMaterial, 
     const water = mesh(vertices, faces, surface, polished ? colors : undefined, uv);
     water.receiveShadow = false;
     group.add(water);
+    if (polished && reflection) released.push(reflection.register(water, waterLevel));
   }
+  return () => released.forEach(unregister => unregister());
 }
 
 function spruceGeometry() {
@@ -2243,6 +2248,7 @@ export interface SceneryMaps {
   ballast?: Texture;
   spruce?: Texture;
   pineAndBirch?: Texture;
+  waterReflection?: WaterReflection;
   siding?: Texture;
   roofing?: Texture;
 }
@@ -2309,6 +2315,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   water.normalMap = waterNormals();
   water.normalScale.set(0.22, 0.28);
   water.envMapIntensity = polished ? 1.55 : 1.15;
+  if (polished) decorrelateWaterNormals(water);
 
   const snow = [coatedBySnow(ground, 0.92), coatedBySnow(distantGround, 0.92), coatedBySnow(ballast, 0.57),
     coatedBySnow(roofs, 0.87), coatedBySnow(concrete, 0.29)];
@@ -2322,7 +2329,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   const applyTrackDetail = addTrack(group, data, rail, ballast, concrete, nearby,
     exposedRock ? { surface: ground, paint } : undefined);
   addParallelTracks(group, data, nearby, ballast);
-  addWater(group, data, water, polished);
+  const releaseWater = addWater(group, data, water, polished, maps.waterReflection);
   addBuildings(group, data, windows, roofs, maps.siding, nearby, polished);
   const vegetation = polished ? createVegetation(data, rail, {
     ownsCell: placement?.ownsCell,
@@ -2392,6 +2399,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
     vegetation?.dispose();
     passengers?.dispose();
     exposedRock?.dispose();
+    releaseWater();
   };
   const setBoardingDoors = (doorways: readonly Vector3[]) => passengers?.setDoors(doorways);
   return { group, setWeather, setNight, setSignal, setBoardingDoors, update, dispose };

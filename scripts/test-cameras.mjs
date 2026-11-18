@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Group, Vector3 } from 'three';
+import { readFile } from 'node:fs/promises';
+import { frameHero, heroShots } from '../src/hero.ts';
 import { Cameras } from '../src/cameras.ts';
 
 test('every settled camera follows interpolated train motion frame to frame', () => {
@@ -69,4 +71,20 @@ test('the map holds a selected station while the cab moves', () => {
   train.position.x += 1;
   cameras.update(train, eye, 1 / 60);
   assert.equal(cameras.camera.position.x, 701);
+});
+
+test('Voss overlook frames the same service chainage from an oblique town-side view', async () => {
+  const { services: [r40] } = JSON.parse(await readFile('public/data/r40/network.json', 'utf8'));
+  const shot = heroShots(r40).find(item => item.id === '08-voss-overlook');
+  assert.equal(shot.distance, r40.stations.at(-1).stopDistance - 20);
+  const camera = new Cameras();
+  const train = new Group();
+  train.position.set(8000, 58, 550);
+  frameHero(camera, shot, train.position);
+  camera.update(train, new Vector3(), 1 / 60, () => 57);
+  const position = camera.camera.position;
+  assert.equal(position.y, 132);
+  assert.ok(position.x < train.position.x - 55 && position.z < train.position.z - 45);
+  assert.ok(camera.mapFocus.distanceTo(new Vector3(8014, 60, 560)) < 1e-8);
+  assert.equal(camera.camera.fov, 63);
 });

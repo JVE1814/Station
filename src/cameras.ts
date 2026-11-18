@@ -36,6 +36,7 @@ export class Cameras {
   private grounded = false;
   private lookLift = 0;
   private mapLean = .22;
+  private mapBearing = 0;
   private transition = 0;
   private readonly movingCamera: boolean;
 
@@ -71,13 +72,14 @@ export class Cameras {
     this.transition = 0.72;
   }
 
-  cut(lift = 0, mapLean = .22): void {
+  cut(lift = 0, mapLean = .22, mapBearing = 0): void {
     this.initialized = false;
     this.transition = 0;
     this.mapGround = undefined;
     this.grounded = true;
     this.lookLift = lift;
     this.mapLean = mapLean;
+    this.mapBearing = mapBearing;
   }
 
   setChaseOrbit(radius: number, polar: number, azimuth: number): void {
@@ -160,7 +162,9 @@ export class Cameras {
       this.target.y = this.mapGround;
       this.destination.copy(this.target);
       this.destination.y += this.mapOffset.y;
-      this.destination.z += this.mapOffset.y * this.mapLean;
+      const standOff = this.mapOffset.y * this.mapLean;
+      this.destination.x += Math.sin(this.mapBearing) * standOff;
+      this.destination.z += Math.cos(this.mapBearing) * standOff;
     }
     if (this.view !== 'cab') {
       this.target.y += this.lookLift;

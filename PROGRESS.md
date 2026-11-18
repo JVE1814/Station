@@ -219,3 +219,9 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - Captured the third set with consistently unique scenery tiles. Both reviewers assessed all fourteen images. The lowest score held at 2/10, for Seimsgrend foliage and the riverbank material. Reviewer B's lowest category was 3.6/10 and the lowest frame mean was the Voss overlook. [Review A](reference/r40/review-a.md) · [Review B](reference/r40/review-b.md)
 - Verified the camera transition fix in the production offline browser check. F4, F5 and F6 loaded, and F4 reached the mapped Stavanger camera position with the correct service still selected.
 - The next WebGL capture caught a GLSL reserved identifier in the distant-summit shader. Renamed it and restarted the complete verification and fourth gallery capture. The fourth score and the full verification result are pending.
+
+## Voss overlook candidate
+
+- Preserved the Voss shot’s 17,525.21 m chainage. The camera now looks southeast from the town side of the railway at 75 m above the focus ground, using a 1.36 horizontal lean and a −2.24 rad bearing from the original south-facing axis. The focus is 14 m east and 10 m south of the train, with 3 m of target lift.
+- In a diagnostic projection of the actual OSM footprints and the baked terrain, visible roof area for the two foreground hotels dropped from about 11% of the frame to about 2%. All three carriage centres stayed inside the frame. The diagnostic geometry is a composition check, with rendered comparison still pending.
+- Broad untagged flat roofs use a muted material tint based on footprint area. Recognised OSM roof material and explicit colour take priority. Roof geometry is unchanged. TypeScript, focused lint and all eight camera/roof tests passed in the isolated worktree.

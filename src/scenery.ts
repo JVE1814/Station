@@ -28,7 +28,7 @@ import {
 } from 'three';
 import type { Intersection, Material, Texture } from 'three';
 import type { Rail } from './rail';
-import { gabledRoof } from './roof.ts';
+import { gabledRoof, roofTint } from './roof.ts';
 import type { GabledRoof } from './roof.ts';
 import { blendExposedRock, civilTexture, dustHighPeaks } from './scenery-materials.ts';
 import { applyWaterBanks, createShorelineField } from './lake-surface.ts';
@@ -1457,11 +1457,10 @@ function addBuildingCluster(
         }
       }
     }
-    const taggedRoofColor = feature.tags['roof:colour'];
     const roofPalette = [0x877c73, 0x696466, 0x858783, 0x8a695f, 0x797674, 0x8f9594];
-    const roofColor = polished ? new Color(taggedRoofColor && /^#[0-9a-f]{6}$/i.test(taggedRoofColor)
-      ? taggedRoofColor : roofPalette[Math.floor(random() * roofPalette.length)]) : undefined;
-    if (roofColor && !taggedRoofColor && outline.length > 20) roofColor.lerp(new Color(0xa9a49c), 0.4);
+    const roofColor = polished
+      ? roofTint(feature.tags, roofPalette[Math.floor(random() * roofPalette.length)], roofRise === 0, outline)
+      : undefined;
     const roof = gabled ? gabledRoof(outline, roofRise, feature.tags['roof:orientation'] === 'across') : undefined;
     if (roof && roofColor) appendGabledRoof(batches, roof, height, roofColor, color);
     else appendRoof(batches, outline, height, roofRise, holes, roofColor);

@@ -18,8 +18,8 @@ for row in "${!views[@]}"; do
       exit 1
     fi
     crop="557x313+$((column * 557))+$((row * 313))"
-    magick \( reference/view-study.png -crop "$crop" +repage -resize 960x540! \) \
-      \( "$render" -resize 960x540 \) +append -quality 89 \
+    magick \( reference/view-study.png -crop "$crop" +repage -resize 1920x1080! \) \
+      "$render" +append -quality 90 \
       "evidence/comparisons/$view-$condition.jpg"
   done
 done

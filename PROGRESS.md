@@ -68,6 +68,7 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - The first 169-tile audit exposed five issues. Fixed the underlying bridge terrain and abutments, a tunnel approach, a signal pole lacking a source heading and the lining on a sharp tunnel curve. All five targeted reruns passed.
 - Expanded the production coach audit to include actual platform, bridge and catenary geometry. Graded platform meshes against the rail profile, kept curbs outside the loading gauge and moved generated supports and station furniture away from neighboring tracks around the Kristiansand reversal.
 - Expanded regressions passed at Seimsgrend and Bulken, Oslo S, Lysaker, Drammen, Kristiansand, Stavanger and Trondheim. The fresh all-tile audit is queued.
+- The final expanded audit passed all 169 intercity tiles. It recorded 811,299 trackbed probes with a 0.364 m maximum gap and zero missing, and 12,126,285 coach-envelope probes with zero intersections.
 
 ## 1080p rendering workload
 

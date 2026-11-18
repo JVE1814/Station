@@ -14,7 +14,7 @@ try {
     args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
   });
   try {
-    const drivingViewport = { width: 640, height: 360 };
+    const drivingViewport = { width: 480, height: 270 };
     const page = await browser.newPage({ viewport: drivingViewport });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -80,7 +80,7 @@ try {
     const snapshots = new Set();
     const cdp = await page.context().newCDPSession(page);
     await mkdir('evidence', { recursive: true });
-    let deadline = Date.now() + 18 * 60_000;
+    let deadline = Date.now() + 30 * 60_000;
     const capture = async (name, view) => {
       const started = Date.now();
       await keys('p');
@@ -102,7 +102,7 @@ try {
       deadline += Date.now() - started;
     };
     let bridgeApproach = false;
-    let terminal = false;
+    let approach = 0;
     let crossed = 0;
     for (;;) {
       const current = await state();
@@ -121,10 +121,10 @@ try {
         crossed = Math.floor(current.chainage / 500);
         console.log(`Passed route metre ${Math.round(current.chainage)} at ${current.speed} km/h`);
       }
-      if (current.remaining <= 38 && !terminal) {
-        terminal = true;
-        await keys('t');
-        await keys('t');
+      const nextApproach = current.remaining <= 5 ? 3 : current.remaining <= 24 ? 2 : current.remaining <= 120 ? 1 : 0;
+      if (nextApproach > approach) {
+        approach = nextApproach;
+        console.log(`Bulken approach · ${current.remaining} m remaining, ${current.speed} km/h`);
       }
       if (!bridgeApproach && current.chainage >= bridge.start - 120 && current.chainage < bridge.end) {
         bridgeApproach = true;

@@ -88,6 +88,22 @@ test('tunnel clearance follows the real mouths through contiguous ways and neigh
   assert.ok(crossTile.every(plant => Math.hypot(plant.east, plant.north - 20) >= 12.8 + plant.width * 0.5));
 });
 
+test('riparian clumps stay on the land side of both banks and islands', () => {
+  const rail = new Rail(data.rail);
+  const water = { osmId: 9, type: 'water', tags: {},
+    points: rectangle(50, -70, 88, 70),
+    holes: [rectangle(63, -42, 75, -15).reverse()] };
+  const world = { ...data, features: [water] };
+  const plants = placeVegetation(world, rail, { ownsCell: (east, z) => east >= 46 && z <= 60 });
+  assert.ok(plants.length > 12 && plants.length <= 220);
+  assert.ok(plants.every(plant => plant.height < 0.93 && ['grass', 'willow'].includes(plant.kind)));
+  const insideIsland = ({ east, north }) => east > 63 && east < 75 && north > -42 && north < -15;
+  assert.ok(plants.some(insideIsland));
+  assert.ok(plants.every(plant =>
+    plant.east >= 46 && plant.north >= -60 &&
+    (plant.east <= 50 || plant.east >= 88 || plant.north >= 70 || insideIsland(plant))));
+});
+
 test('the baked R40 woodland supports distinct species and varied shoulder plants', async () => {
   const world = JSON.parse(await readFile('public/data/service.json', 'utf8'));
   const plants = placeVegetation(world, new Rail(world.rail));

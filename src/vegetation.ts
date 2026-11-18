@@ -237,6 +237,53 @@ function tunnelMouths(rail: Rail, spans: readonly TrackSpan[]) {
   return mouths;
 }
 
+type BankPlant = { east: number; north: number; height: number; width: number; seed: number; rank: number; willow: boolean };
+
+function bankCandidates(data: WorldData, extent: Bounds, approaches: (east: number, north: number) => number) {
+  const candidates: BankPlant[] = [];
+  for (const feature of data.features) {
+    if (feature.type !== 'water') continue;
+    const rings = [feature.points, ...(feature.holes ?? [])];
+    for (const [ringIndex, ring] of rings.entries()) {
+      if (ring.length < 3) continue;
+      const signedArea = ring.reduce((area, [x, y], index) => {
+        const [a, b] = ring[(index + 1) % ring.length];
+        return area + x * b - y * a;
+      }, 0);
+      if (signedArea === 0) continue;
+      // The interior of a hole is land, the interior of the outer ring is water.
+      const landSide = Math.sign(signedArea) * (ringIndex === 0 ? -1 : 1);
+      for (const [edge, [x, y]] of ring.entries()) {
+        const [a, b] = ring[(edge + 1) % ring.length];
+        if (Math.max(x, a) < extent.minX - 3 || Math.min(x, a) > extent.maxX + 3 ||
+            Math.max(y, b) < extent.minY - 3 || Math.min(y, b) > extent.maxY + 3) continue;
+        const dx = a - x;
+        const dy = b - y;
+        const length = Math.hypot(dx, dy);
+        if (length < 0.4) continue;
+        const samples = Math.max(1, Math.floor(length / 5.7));
+        for (let index = 0; index < samples; index++) {
+          const seed = feature.osmId + edge * 163 + ringIndex * 1597 + index * 379;
+          const variance = hash(seed, 71, 53);
+          if (variance < 0.29) continue;
+          const fraction = (index + 0.16 + hash(seed, 19, 57) * 0.68) / samples;
+          const willow = variance > 0.82;
+          const height = willow ? 0.46 + hash(seed, 23, 63) * 0.46 : 0.28 + hash(seed, 23, 61) * 0.52;
+          const width = height * (willow ? 1.45 : 0.89);
+          const offset = width * 0.5 + 0.25 + hash(seed, 27, 67) ** 2 * 1.55;
+          const east = x + fraction * dx - dy / length * landSide * offset;
+          const north = y + fraction * dy + dx / length * landSide * offset;
+          if (!inBounds(east, north, extent)) continue;
+          const approach = approaches(east, north);
+          if (approach > 155) continue;
+          candidates.push({ east, north, height, width, seed, willow, rank: approach / 180 + hash(seed, 11, 31) });
+        }
+      }
+    }
+  }
+  return candidates.sort((a, b) => a.rank - b.rank);
+}
+
 function maintainedHeight(maturity: number, setback: number, morph: number) {
   const young = Math.min(maturity, 1.25 + Math.min(30, Math.max(0, setback - 6)) * 0.115 + morph * 0.94);
   const recovery = Math.max(0, Math.min(1, (setback - 14) / 32)) ** 3;
@@ -384,6 +431,17 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
         }
       }
     }
+  }
+  const bankCells = new Set<string>();
+  const priorCount = plants.length;
+  for (const candidate of bankCandidates(data, extent, approaches)) {
+    if (plants.length - priorCount >= 220) break;
+    const { east, north, height, width, seed, willow } = candidate;
+    const cell = `${Math.floor(east / 2.5)}:${Math.floor(north / 2.5)}`;
+    if (bankCells.has(cell) || !accepted(east, north) || groundSlope(east, north) > 0.58) continue;
+    if (distanceToTrack(east, north) < (willow ? 5.8 : 3.05) + width * 0.55) continue;
+    bankCells.add(cell);
+    grow(east, north, willow ? 'willow' : 'grass', height, width, seed);
   }
   return plants;
 }

@@ -111,7 +111,7 @@ function batchRigidParts(group: Group) {
   const batches = new Map<string, Mesh<BufferGeometry, MeshStandardMaterial>[]>();
   for (const object of group.children) {
     if (!(object instanceof Mesh) || !(object.material instanceof MeshStandardMaterial)) continue;
-    const key = [object.material.id, object.castShadow, object.receiveShadow].join('/');
+    const key = [object.material.id, object.castShadow, object.receiveShadow, object.geometry.index !== null].join('/');
     const batch = batches.get(key) ?? [];
     batch.push(object);
     batches.set(key, batch);
@@ -121,7 +121,7 @@ function batchRigidParts(group: Group) {
     const geometries = batch.map((part) => {
       part.updateMatrix();
       const geometry = part.geometry.clone().applyMatrix4(part.matrix);
-      if (!part.material.map) geometry.deleteAttribute('uv');
+      if (!part.material.map && !part.material.bumpMap) geometry.deleteAttribute('uv');
       return geometry;
     });
     const geometry = mergeGeometries(geometries);
@@ -685,6 +685,9 @@ function makeCabGeometry(group: Group, grain?: Texture) {
   const fill = new PointLight(new Color(0xffdbac), 1.2, 2.9, 2);
   fill.position.set(0.38, 2.64, -9.90);
   group.add(fill);
+  batchRigidParts(dash);
+  batchRigidParts(controls);
+  batchRigidParts(group);
   return { speed, pressure, power, reservoir, throttle, brake, amber, green, fill };
 }
 

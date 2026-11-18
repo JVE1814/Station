@@ -17,3 +17,5 @@ The [independent station audit](station-membership.txt) checks each displayed na
 The browser drive captured the [river bridge](bridge.png) in chase view and the [Bulken tunnel](tunnel.png) from the cab.
 
 The [data rebuild output](data-rebuild.txt) records a full run of `npm run data` and the SHA-256 comparison of its public assets with the committed copies.
+
+The [pre-optimization cab sample](r40-timing-before-batching.txt) records the initial 1080p CPU proxy failure and render workload that led to terrain, forest and cab batching.

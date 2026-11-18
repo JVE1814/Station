@@ -154,5 +154,6 @@ export class NetworkOverview {
       item.sprite.visible = item.terminal
         || (height < 44_000 && camera.distanceToSquared(item.sprite.position) < (height * 1.8) ** 2);
     }
+    this.group.updateMatrixWorld();
   }
 }

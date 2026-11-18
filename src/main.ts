@@ -39,6 +39,8 @@ async function run(): Promise<void> {
   const traffic = network?.traffic?.length ? new Traffic(data, rail, service, network.traffic) : null;
   const scene = new Scene();
   scene.matrixAutoUpdate = false;
+  // Tile transforms are set when built. Moving stock, lighting and map labels update their own matrices.
+  scene.matrixWorldAutoUpdate = false;
   const renderer = new WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio));
   renderer.toneMapping = ACESFilmicToneMapping;
@@ -147,6 +149,7 @@ async function run(): Promise<void> {
       coach.group.visible = !(hideNose && index === leadIndex);
       coach.update({ ...movement.controls, speed: movement.state.speed, night: night || movement.trackSpan.tunnel, deltaSeconds: elapsed,
         headlights: index === leadIndex });
+      if (coach.group.visible) coach.group.updateMatrixWorld();
     });
   }
 
@@ -380,8 +383,11 @@ async function run(): Promise<void> {
     place(cab.group, chainage);
     const inTunnel = service.trackSpan.tunnel;
     const visual = { ...service.controls, speed: state.speed, night: night || inTunnel, deltaSeconds: elapsed };
-    cab.update(visual);
     cab.group.visible = cameras.view === 'cab';
+    if (cab.group.visible) {
+      cab.update(visual);
+      cab.group.updateMatrixWorld();
+    }
     placeConsist(coaches, service, elapsed, cameras.view === 'cab');
     if (traffic) {
       const visible = new Set<string>();

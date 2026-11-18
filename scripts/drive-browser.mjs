@@ -40,6 +40,8 @@ try {
       };
     });
     const keys = key => page.keyboard.press(key);
+    const waitForPaint = () => page.evaluate(() =>
+      new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     let controls = { traction: 0, brake: 5 };
     const setNotches = async (desired) => {
       const power = desired.traction - controls.traction;
@@ -88,7 +90,7 @@ try {
       await page.setViewportSize({ width: 1920, height: 1080 });
       await page.waitForFunction(() => document.querySelector('#world canvas').width === 1920, null,
         { timeout: 120_000, polling: 150 });
-      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await waitForPaint();
       const shot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true, optimizeForSpeed: true });
       await writeFile(`evidence/${name}.png`, Buffer.from(shot.data, 'base64'));
       console.log(`Captured ${name} at 1080p`);
@@ -133,7 +135,7 @@ try {
       await setNotches(manualNotches(current.speed, current.remaining, current.limit));
       if (current.remaining <= 5 && current.speed === 0) {
         await keys('d');
-        await page.waitForTimeout(300);
+        await waitForPaint();
         continue;
       }
       if (current.structure === 'bridge' && !snapshots.has('bridge')) {

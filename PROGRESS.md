@@ -68,3 +68,9 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - The first 169-tile audit exposed five issues. Fixed the underlying bridge terrain and abutments, a tunnel approach, a signal pole lacking a source heading and the lining on a sharp tunnel curve. All five targeted reruns passed.
 - Expanded the production coach audit to include actual platform, bridge and catenary geometry. Graded platform meshes against the rail profile, kept curbs outside the loading gauge and moved generated supports and station furniture away from neighboring tracks around the Kristiansand reversal.
 - Expanded regressions passed at Seimsgrend and Bulken, Oslo S, Lysaker, Drammen, Kristiansand, Stavanger and Trondheim. The fresh all-tile audit is queued.
+
+## 1080p rendering workload
+
+- The first moving-train cab sample on SwiftShader recorded 11.82 ms on the renderer main-thread CPU clock. The last rendered frame issued 471 draws. Ended that superseded profiling run after the cab result so the next browser runs could exercise the optimized build.
+- Batches now use physical terrain patch dimensions across DEM resolutions, combine distant spruce into larger tiles, and combine fixed cab parts without changing the gauge and lever animations. Static scenery matrices update only when each tile is built. At the same R40 cab diagnostic position, visible ground meshes fell from 133 to 26 and distant forest batches from 60 to 16.
+- Typecheck, lint, 20 tests and the static build passed. Rechecked 1,302 R40 trackbed probes and 21,780 coach probes. The worst gap stayed 0.305 m and no coach probe intersected an obstacle. The full timed browser check still needs the new build.

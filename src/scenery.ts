@@ -332,9 +332,9 @@ function createTerrain(
 ) {
   const group = new Group();
   group.name = 'Graded Copernicus DEM';
-  const tileCells = 18;
   const { terrain } = data;
   const { width, height, spacing, east, north } = terrain;
+  const tileCells = Math.max(8, Math.round(550 / spacing));
   const grade = (x: number, z: number) => gradedHeight(data, nearby, x, z);
   const grass = new Color(0xb8bd90);
   const rock = new Color(0xc1b4a5);
@@ -445,6 +445,7 @@ function createTerrain(
       if (indices.length === 0) continue;
       const tile = mesh(vertices, indices, surface, colors, uv, normals);
       tile.geometry.computeBoundingSphere();
+      tile.geometry.computeBoundingBox();
       group.add(tile);
     }
   }
@@ -1540,7 +1541,6 @@ function addForests(
   ownsCell?: (east: number, worldZ: number) => boolean,
 ) {
   type ForestTile = { near: Transform[]; far: Transform[]; trunks: Transform[] };
-  const tileSize = 320;
   const tiles = new Map<string, ForestTile>();
   const land = data.terrain;
   for (const feature of data.features) {
@@ -1567,12 +1567,13 @@ function addForests(
         const nearest = nearby(east, -north);
         if (nearest && nearest.distance < 8 && !nearest.span.tunnel) continue;
         const near = nearest && nearest.distance < 32;
+        const tileSize = near ? 320 : 960;
         const height = 5 + random() ** 0.65 * 12.5;
         const radius = height * (0.15 + random() * 0.08);
         const ground = coordinate([east, north], elevationAt(data, east, -north));
         const scale = 0.68 + random() * 0.32;
         const rotation = new Quaternion().setFromAxisAngle(UP, random() * Math.PI * 2);
-        const key = `${Math.floor(east / tileSize)}:${Math.floor(north / tileSize)}`;
+        const key = `${tileSize}:${Math.floor(east / tileSize)}:${Math.floor(north / tileSize)}`;
         let tile = tiles.get(key);
         if (!tile) {
           tile = { near: [], far: [], trunks: [] };
@@ -1924,6 +1925,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
     object.updateMatrix();
     object.matrixAutoUpdate = false;
   });
+  group.updateMatrixWorld();
 
   const setWeather = (weather: Weather) => {
     grass.material.color.setHex(weather === 'snow' ? 0xa6ac91 : 0x89965a);
@@ -1951,8 +1953,8 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
     grass.applyDistance(camera);
     applyTrackDetail(camera);
     for (const tile of terrainTiles) {
-      const center = tile.geometry.boundingSphere?.center;
-      const detailed = center && camera.distanceToSquared(center) <= 390 ** 2;
+      const bounds = tile.geometry.boundingBox;
+      const detailed = bounds && bounds.distanceToPoint(camera) <= 210;
       tile.material = detailed ? ground : distantGround;
     }
     for (const bulb of bulbs) bulb.visible = nightLighting && bulb.position.distanceToSquared(camera) < 105 ** 2;

@@ -157,17 +157,21 @@ export class Atmosphere {
     this.sun.intensity = this.sunLevel * (1 - this.shelter * 0.995);
     this.fill.intensity = this.fillLevel * (1 - this.shelter * 0.93);
     this.dome.position.copy(cameraPosition);
+    this.dome.updateMatrixWorld();
     this.fog.density = this.density / (1 + Math.max(0, cameraPosition.y - position.y) / 500);
     if (this.shadowCenter.distanceToSquared(position) >= 0.85 ** 2) {
       this.shadowCenter.copy(position);
       this.sun.target.position.copy(position);
       this.sun.position.copy(position).add(this.sunOffset);
+      this.sun.target.updateMatrixWorld();
+      this.sun.updateMatrixWorld();
       this.sun.shadow.needsUpdate = true;
     }
     this.particles.visible = this.weather !== 'clear' && !underCover;
     if (!this.particles.visible) return;
     this.particles.position.copy(position);
     this.particles.position.y -= 3;
+    this.particles.updateMatrixWorld();
     const fall = this.weather === 'snow' ? 2.1 : 15;
     for (let index = 1; index < this.positions.length; index += 3) {
       this.positions[index] -= elapsed * fall;

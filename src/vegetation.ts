@@ -15,6 +15,8 @@ type TreeImage = CanvasImageSource & { width: number; height: number };
 export interface VegetationOptions {
   ownsCell?: (east: number, worldZ: number) => boolean;
   heightAt?: (east: number, worldZ: number) => number;
+  portalRail?: Rail;
+  portalSpans?: readonly TrackSpan[];
   spruceImage?: TreeImage;
   pineAndBirchImage?: TreeImage;
 }
@@ -215,6 +217,26 @@ function treeKind(feature: WorldFeature, roll: number): PlantKind {
   return forest[roll < 0.68 ? 0 : roll < 0.87 ? 1 : 2];
 }
 
+function tunnelMouths(rail: Rail, spans: readonly TrackSpan[]) {
+  const tunnels: { start: number; end: number }[] = [];
+  for (const span of spans) {
+    if (!span.tunnel) continue;
+    const preceding = tunnels.at(-1);
+    if (preceding && span.start <= preceding.end + 0.025) preceding.end = Math.max(preceding.end, span.end);
+    else tunnels.push({ start: span.start, end: span.end });
+  }
+  const mouths: LocalPoint[] = [];
+  for (const tunnel of tunnels) {
+    for (const [chainage, direction] of [[tunnel.start, -1], [tunnel.end, 1]]) {
+      const end = rail.position(chainage);
+      // A window clipped in the middle of a bore has no open approach.
+      if (rail.position(chainage + direction * 0.4).distanceToSquared(end) < 1e-5) continue;
+      mouths.push([end.x, -end.z]);
+    }
+  }
+  return mouths;
+}
+
 function maintainedHeight(maturity: number, setback: number, morph: number) {
   const young = Math.min(maturity, 1.25 + Math.min(30, Math.max(0, setback - 6)) * 0.115 + morph * 0.94);
   const recovery = Math.max(0, Math.min(1, (setback - 14) / 32)) ** 3;
@@ -232,10 +254,15 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
   const accepted = (x: number, y: number) =>
     inBounds(x, y, extent) && (options.ownsCell?.(x, -y) ?? true) && !excluded(x, y);
   const plants: Plant[] = [];
-  const growth = (x: number, y: number, kind: PlantKind, height: number, width: number, seed: number, dry = 0) => ({
-    kind, dry, east: x, north: y, height, width, rotation: hash(seed, 59, 19) * 2 * Math.PI,
-    tint: 0.65 + hash(seed, 15, 23) * 0.35,
-  });
+  const mouths = tunnelMouths(options.portalRail ?? rail, options.portalSpans ?? data.spans);
+  const grow = (x: number, y: number, kind: PlantKind, height: number, width: number, seed: number, dry = 0) => {
+    const clearance = 12.8 + width * 0.5;
+    if (mouths.some(([east, north]) => (x - east) ** 2 + (y - north) ** 2 < clearance ** 2)) return;
+    plants.push({
+      kind, dry, east: x, north: y, height, width, rotation: hash(seed, 59, 19) * 2 * Math.PI,
+      tint: 0.65 + hash(seed, 15, 23) * 0.35,
+    });
+  };
 
   const groundSlope = (x: number, y: number) => Math.hypot(
     groundHeight(terrain, x + 2, y) - groundHeight(terrain, x - 2, y),
@@ -250,7 +277,7 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
     const width = height * (kind === 'grass' ? 1.32 : 2.12);
     if (distanceToTrack(x, y) < (kind === 'willow' ? 5.8 : 3.05) + width * 0.55) return;
     const tone = (kind === 'grass' ? 0.42 : 0.73) + hash(seed, 74, 13) * 0.25;
-    plants.push(growth(x, y, kind, height, width, seed, tone));
+    grow(x, y, kind, height, width, seed, tone);
   };
 
   const approaches = collectRailApproaches(rail);
@@ -266,7 +293,7 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
     const height = maintainedHeight(maturity, setback, morph);
     const width = height * (kind === 'spruce' ? 0.28 : kind === 'pine' ? 0.43 : 0.4);
     if (setback < width * 0.52 + 4.8) return;
-    plants.push(growth(x, y, kind, height, width, Math.floor(hash(col, row, variant + 6) * 2 ** 30)));
+    grow(x, y, kind, height, width, Math.floor(hash(col, row, variant + 6) * 2 ** 30));
   };
   const cell = 24;
   for (let row = Math.floor(extent.minY / cell); row * cell <= extent.maxY; row++) {
@@ -316,7 +343,7 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
           ? 0.58 + 0.48 * roll : 0.32 + 0.62 * roll;
         const width = height * (kind === 'willow' ? 1.42 : kind === 'grass' ? 1.25 : 0.95);
         if (distanceToTrack(x, y) < (kind === 'willow' ? 5.8 : 3.05) + width * 0.55) continue;
-        plants.push(growth(x, y, kind, height, width, seed + strip * 24 + side));
+        grow(x, y, kind, height, width, seed + strip * 24 + side);
       }
       const patch = Math.floor(d / 10.8);
       if (Math.floor((d - 2.7) / 10.8) !== patch && hash(patch, side, 84) > 0.27) {
@@ -339,7 +366,7 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
           const height = kind === 'willow' ? 1.15 + 1.42 * mix : 0.52 + 0.53 * mix;
           const width = height * (kind === 'willow' ? 1.62 : 1.26);
           if (distanceToTrack(x, y) < (kind === 'willow' ? 5.8 : 3.05) + width * 0.55) continue;
-          plants.push(growth(x, y, kind, height, width, patch * 37 + side * stem));
+          grow(x, y, kind, height, width, patch * 37 + side * stem);
         }
       }
       // Draw juvenile trees along the edges of the mapped forest cover.
@@ -353,7 +380,7 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
           const kind = treeKind(canopy, hash(seed, side, 48));
           const morph = hash(seed, side, 81);
           const height = maintainedHeight(1.6 + 3.25 * morph, setback, morph);
-          plants.push(growth(x, y, kind, height, height * 0.43, seed * side));
+          grow(x, y, kind, height, height * 0.43, seed * side);
         }
       }
     }

@@ -159,3 +159,5 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 
 - Rebuilt the R40 waiting shelter on mapped footprint 512804977. Its opening faces the adjoining timber deck, with the tagged bench under a shallow dark roof. Corner posts stand on metal shoes, and rear and side screens provide cover. The model uses the same platform furniture collision checks as the other fixtures.
 - On the Seimsgrend–Bulken tile, 1,707 trackbed probes found a maximum gap of 0.316 m with zero misses. All 26,820 coach-clearance probes passed. TypeScript, targeted lint, and five boarding and roof tests passed.
+
+- Cleared foliage from the mapped tunnel mouths, including the Bulken approach in shot 05. The mask uses 12.8 m plus half the plant’s width and joins contiguous OSM tunnel ways before calculating portal positions. Streamed tiles use the neighboring rail window so a tile edge does not create or lose a clearing. The closest rooted plants at the two mapped Bulken mouths are now 13.30 m and 13.71 m away, with 52 and 35 roots still present in the nearby 15–25 m ring. Typecheck, targeted lint and all five vegetation tests passed.

@@ -63,6 +63,31 @@ test('steep exposed slopes carry compact dry plants while mature woodland stays 
     .filter(plant => plant.dry > 0 && plant.east > 43), []);
 });
 
+test('tunnel clearance follows the real mouths through contiguous ways and neighboring tiles', () => {
+  const rail = new Rail(data.rail);
+  const source = data.spans[0];
+  const spans = [
+    { ...source, start: 0, end: 40 },
+    { ...source, start: 40, end: 80, tunnel: true },
+    { ...source, start: 80, end: 120, tunnel: true },
+    { ...source, start: 120, end: 200 },
+  ];
+  const forestData = { ...data, spans, features: [data.features[0]] };
+  const plants = placeVegetation(forestData, rail);
+  for (const north of [-60, 20]) {
+    assert.ok(plants.every(plant => Math.hypot(plant.east, plant.north - north) >= 12.8 + plant.width * 0.5));
+  }
+  assert.ok(plants.some(plant => Math.hypot(plant.east, plant.north + 20) < 10),
+    'The join halfway through the tunnel must not clear an invented opening');
+  const next = [
+    { distance: 0, east: 0, north: 20, height: 10 },
+    { distance: 80, east: 0, north: 100, height: 10 },
+  ];
+  const nextTile = { ...forestData, rail: next, spans: [{ ...source, start: 0, end: 80 }] };
+  const crossTile = placeVegetation(nextTile, new Rail(next), { portalRail: rail, portalSpans: spans });
+  assert.ok(crossTile.every(plant => Math.hypot(plant.east, plant.north - 20) >= 12.8 + plant.width * 0.5));
+});
+
 test('the baked R40 woodland supports distinct species and varied shoulder plants', async () => {
   const world = JSON.parse(await readFile('public/data/service.json', 'utf8'));
   const plants = placeVegetation(world, new Rail(world.rail));

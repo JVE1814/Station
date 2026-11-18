@@ -2442,6 +2442,8 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   const vegetation = polished ? createVegetation(data, rail, {
     ownsCell: placement?.ownsCell,
     heightAt: (x, z) => gradedHeight(data, nearby, x, z),
+    portalRail: placement?.gradeRail,
+    portalSpans: placement?.gradeSpans,
     spruceImage: maps.spruce?.image as VegetationOptions['spruceImage'],
     pineAndBirchImage: maps.pineAndBirch?.image as VegetationOptions['pineAndBirchImage'],
   }) : undefined;

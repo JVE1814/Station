@@ -609,6 +609,101 @@ function addPortalBackfill(
   group.add(fill, frontage);
 }
 
+function portalStoneMaterial(sections: number) {
+  const stone = material(0xe4ddcf, 0.9);
+  const blocks = texture(512, ctx => {
+    const size = 512;
+    const random = generator(5107);
+    // The UV follows the ring. Its first and last segments are the longer jambs.
+    const divisions = Array.from({ length: sections + 1 }, (_, index) => index / sections);
+    divisions.splice(1, 0, 1 / (3 * sections), 2 / (3 * sections));
+    divisions.splice(divisions.length - 1, 0, 1 - 2 / (3 * sections), 1 - 1 / (3 * sections));
+    ctx.fillStyle = '#615b52';
+    ctx.fillRect(0, 0, size, size);
+    for (let block = 1; block < divisions.length; block++) {
+      const left = divisions[block - 1] * size;
+      const width = (divisions[block] - divisions[block - 1]) * size;
+      const tone = Math.floor(147 + random() * 29);
+      ctx.fillStyle = `rgb(${tone + 5}, ${tone}, ${tone - 8})`;
+      ctx.fillRect(left + 0.9, 0, width - 1.8, size);
+      ctx.fillStyle = '#eee2ce6b';
+      ctx.fillRect(left + 0.9, 0, 1.05, size);
+      ctx.fillStyle = '#403b335f';
+      ctx.fillRect(left + width - 2.15, 0, 1.25, size);
+      for (let grain = 0; grain < 180; grain++) {
+        ctx.fillStyle = random() < 0.5 ? '#382f271d' : '#f9ebd622';
+        ctx.fillRect(left + 2 + random() * Math.max(0, width - 5), random() * size,
+          0.6 + random() * 1.4, 1 + random() * 8);
+      }
+    }
+    const edges = ctx.createLinearGradient(0, 0, 0, size);
+    edges.addColorStop(0, '#3c342871');
+    edges.addColorStop(0.16, '#3c342800');
+    edges.addColorStop(0.81, '#f7e8ce00');
+    edges.addColorStop(1, '#f7e8ce59');
+    ctx.fillStyle = edges;
+    ctx.fillRect(0, 0, size, size);
+  });
+  stone.map = stone.bumpMap = blocks;
+  stone.bumpScale = 0.027;
+  stone.side = DoubleSide;
+  return stone;
+}
+
+function bridgePierMaterial() {
+  const pier = material(0xe1ddce, 0.89);
+  const formwork = texture(512, ctx => {
+    const size = 512;
+    const random = generator(8491);
+    ctx.fillStyle = '#9a9489';
+    ctx.fillRect(0, 0, size, size);
+    for (let x = 0; x < size; x += 32) {
+      const tone = Math.floor(140 + random() * 26);
+      ctx.fillStyle = `rgb(${tone + 5}, ${tone + 1}, ${tone - 6})`;
+      ctx.fillRect(x, 0, 32, size);
+      ctx.fillStyle = '#4740376e';
+      ctx.fillRect(x, 0, 1.4, size);
+      ctx.fillStyle = '#d9d3c05c';
+      ctx.fillRect(x + 1.45, 0, 1.1, size);
+    }
+    for (const row of [125, 290]) {
+      ctx.fillStyle = '#706b60a6';
+      ctx.fillRect(0, row, size, 2);
+      ctx.fillStyle = '#c6bdac98';
+      ctx.fillRect(0, row + 2, size, 1);
+      for (let x = 45; x < size; x += 87) {
+        ctx.beginPath();
+        ctx.arc(x + (row === 125 ? 13 : 0), row + 17, 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#4947409a';
+        ctx.fill();
+      }
+    }
+    for (let streak = 0; streak < 50; streak++) {
+      const x = random() * size;
+      const top = random() * 180;
+      const depth = 38 + random() * 200;
+      const runoff = ctx.createLinearGradient(0, top, 0, top + depth);
+      runoff.addColorStop(0, random() < 0.4 ? '#e1d4b45b' : '#4b4b3e44');
+      runoff.addColorStop(1, '#615c4c00');
+      ctx.fillStyle = runoff;
+      ctx.fillRect(x, top, 1 + random() * 11, depth);
+    }
+    const bank = ctx.createLinearGradient(0, 305, 0, size);
+    bank.addColorStop(0, '#48544100');
+    bank.addColorStop(0.7, '#4b554459');
+    bank.addColorStop(1, '#464333a6');
+    ctx.fillStyle = bank;
+    ctx.fillRect(0, 305, size, size - 305);
+    for (let grain = 0; grain < 6300; grain++) {
+      ctx.fillStyle = random() < 0.5 ? '#362f281f' : '#ded8c323';
+      ctx.fillRect(random() * size, random() * size, 0.7 + random() * 1.6, 0.6 + random() * 2.8);
+    }
+  });
+  pier.map = pier.bumpMap = formwork;
+  pier.bumpScale = 0.018;
+  return pier;
+}
+
 function addTrack(
   group: Group,
   data: WorldData,
@@ -747,6 +842,9 @@ function addTrack(
   });
   insideSection.unshift([-TUNNEL_HALF_WIDTH, -0.48]);
   insideSection.push([TUNNEL_HALF_WIDTH, -0.48]);
+  const archStone = portalTerrain && bedSpans.some(span => span.tunnel)
+    ? portalStoneMaterial(insideSection.length - 1) : lining;
+  const pierSurface = portalTerrain && bedSpans.some(span => span.bridge) ? bridgePierMaterial() : concrete;
   tunnelSurface.side = DoubleSide;
   lining.side = DoubleSide;
   const bridgeDetail: Transform[] = [];
@@ -808,16 +906,18 @@ function addTrack(
         const indices: number[] = [];
         const uv: number[] = [];
         for (let i = 0; i < insideSection.length; i++) {
-          for (const [x, y] of [insideSection[i], outsideSection[i]]) {
+          for (const edge of [0, 1]) {
+            const [x, y] = edge ? outsideSection[i] : insideSection[i];
             const point = position.clone().addScaledVector(lateral, x);
             vertices.push(point.x, point.y + y + Math.sin(cant) * x, point.z);
-            uv.push(x / 1.9, y / 1.9);
+            if (portalTerrain) uv.push(i / (insideSection.length - 1), 0.005 + edge * 0.99);
+            else uv.push(x / 1.9, y / 1.9);
           }
           if (i + 1 === insideSection.length) continue;
           const first = i * 2;
           indices.push(first, first + 1, first + 2, first + 1, first + 3, first + 2);
         }
-        const frontage = mesh(vertices, indices, lining, undefined, uv);
+        const frontage = mesh(vertices, indices, archStone, undefined, uv);
         frontage.name = 'Tunnel portal';
         frontage.castShadow = Boolean(portalTerrain);
         group.add(portal, frontage);
@@ -834,7 +934,7 @@ function addTrack(
   ]);
   for (const [surface, entries] of [
     [sleeper, ties], [clips, fasteners], [support, posts], [wire, conductors],
-    [insulator, porcelain], [concrete, piers], [steel, bridgeDetail],
+    [insulator, porcelain], [pierSurface, piers], [steel, bridgeDetail],
   ] satisfies [MeshStandardMaterial, Transform[]][]) {
     const batches = spatialBatches(entries, 360, entry => [entry.position.x, entry.position.z]);
     for (const batch of batches) {

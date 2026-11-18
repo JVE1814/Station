@@ -174,8 +174,8 @@ export function dustHighPeaks(material: MeshLambertMaterial): void {
       .replace('#include <color_fragment>', `#include <color_fragment>
         vec2 hill = vSummit.xz;
         float exposure = sin(hill.x * .016 + sin(hill.y * .026)) * cos(hill.y * .029 - sin(hill.x * .024));
-        float patch = sin(hill.x * .071 + hill.y * .055) * cos(hill.y * .077);
-        float dusting = smoothstep(610.0, 847.0, vSummit.y + 61.0 * exposure + 24.0 * patch)
+        float ridgeVariation = sin(hill.x * .071 + hill.y * .055) * cos(hill.y * .077);
+        float dusting = smoothstep(610.0, 847.0, vSummit.y + 61.0 * exposure + 24.0 * ridgeVariation)
           * smoothstep(.36, .84, vSummit.w);
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.63, .73, .82), dusting * .62);
       `);

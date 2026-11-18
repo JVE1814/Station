@@ -40,9 +40,18 @@ type Segment = {
   start: number;
   end: number;
   span: TrackSpan;
+  heading: LocalPoint;
   structure?: { kind: 'tunnel' | 'bridge'; start: number; end: number };
 };
-type Nearest = { height: number; distance: number; span: TrackSpan; structureDistance: number };
+type Nearest = {
+  height: number;
+  distance: number;
+  east: number;
+  worldZ: number;
+  span: TrackSpan;
+  heading: LocalPoint;
+  structureDistance: number;
+};
 
 const UP = new Vector3(0, 1, 0);
 const X = new Vector3(1, 0, 0);
@@ -50,6 +59,10 @@ const LINE_WIDTH = 3.7;
 const RAIL_OFFSET = (1.435 + 0.074) / 2;
 const STRUCTURE_CLEARANCE_WIDTH = 3.6;
 const STRUCTURE_CLEARANCE_HEIGHT = 6.7;
+const TUNNEL_HALF_WIDTH = 4.2;
+const TUNNEL_SPRINGLINE = 2.2;
+const TUNNEL_RISE = 4.02;
+const TUNNEL_CUT_MARGIN = 0.45;
 
 function smoothstep(value: number) {
   const amount = Math.max(0, Math.min(1, value));
@@ -184,7 +197,8 @@ function routeIndex(rail: Rail, spans: TrackSpan[]) {
       const end = Math.min(start + interval, span.end);
       const from = rail.position(start);
       const to = rail.position(end);
-      const segment: Segment = { from, to, start, end, span, structure };
+      const heading: LocalPoint = [to.x - from.x, from.z - to.z];
+      const segment: Segment = { from, to, start, end, span, heading, structure };
       for (let x = Math.floor((Math.min(from.x, to.x) - 30) / step); x <= Math.floor((Math.max(from.x, to.x) + 30) / step); x++) {
         for (let z = Math.floor((Math.min(from.z, to.z) - 30) / step); z <= Math.floor((Math.max(from.z, to.z) + 30) / step); z++) {
           const key = `${x}:${z}`;
@@ -197,18 +211,20 @@ function routeIndex(rail: Rail, spans: TrackSpan[]) {
   }
   const nearestAt = (x: number, z: number): Nearest | undefined => {
     let nearest: Nearest | undefined;
-    for (const { from, to, start, end, span, structure } of cells.get(`${Math.floor(x / step)}:${Math.floor(z / step)}`) ?? []) {
+    for (const { from, to, start, end, span, heading, structure } of cells.get(`${Math.floor(x / step)}:${Math.floor(z / step)}`) ?? []) {
       const dx = to.x - from.x;
       const dz = to.z - from.z;
       const lengthSquared = dx * dx + dz * dz;
       if (lengthSquared === 0) continue;
       const fraction = Math.max(0, Math.min(1, ((x - from.x) * dx + (z - from.z) * dz) / lengthSquared));
-      const distance = Math.hypot(x - from.x - dx * fraction, z - from.z - dz * fraction);
+      const east = from.x + dx * fraction;
+      const worldZ = from.z + dz * fraction;
+      const distance = Math.hypot(x - east, z - worldZ);
       if (!nearest || nearest.distance > distance) {
         const chainage = start + (end - start) * fraction;
         const structureDistance = structure
           ? Math.min(chainage - structure.start, structure.end - chainage) : Infinity;
-        nearest = { distance, span, structureDistance, height: from.y + (to.y - from.y) * fraction };
+        nearest = { distance, east, worldZ, span, heading, structureDistance, height: from.y + (to.y - from.y) * fraction };
       }
     }
     return nearest;
@@ -302,10 +318,10 @@ function gradedHeight(data: WorldData, nearby: ReturnType<typeof routeIndex>, x:
     const apron = trackbed + (belowDeck - trackbed) * opening;
     return source + (apron - source) * formation;
   }
-  const blend = track.span.tunnel
-    ? smoothstep((8 - track.distance) / 5) * (1 - smoothstep((track.structureDistance - 5) / 5))
-    : formation;
-  return source + (trackbed - source) * blend;
+  // Keep the approach and the mouth on the same formation; hand over to
+  // undisturbed surface terrain beyond the portal apron.
+  const apron = track.span.tunnel ? 1 - smoothstep((track.structureDistance - 5) / 5) : 1;
+  return source + (trackbed - source) * formation * apron;
 }
 
 function createTerrain(
@@ -396,11 +412,13 @@ function createTerrain(
           const x = (vertices[a * 3] + vertices[b * 3] + vertices[c * 3]) / 3;
           const z = (vertices[a * 3 + 2] + vertices[b * 3 + 2] + vertices[c * 3 + 2]) / 3;
           const track = nearby(x, z);
-          if (track?.span.tunnel && track.structureDistance >= 2.5 && track.distance < 4.2) {
+          const excavationWidth = TUNNEL_HALF_WIDTH + TUNNEL_CUT_MARGIN;
+          if (track?.span.tunnel && track.structureDistance >= 2.5 && track.distance < excavationWidth) {
             // A raster surface cannot describe a bore. Remove cells crossing the arch.
             const low = Math.min(vertices[a * 3 + 1], vertices[b * 3 + 1], vertices[c * 3 + 1]);
             const high = Math.max(vertices[a * 3 + 1], vertices[b * 3 + 1], vertices[c * 3 + 1]);
-            const roof = track.height + 1.42 + 4.8 * Math.sqrt(1 - (track.distance / 4.2) ** 2);
+            const roof = track.height + TUNNEL_SPRINGLINE
+              + TUNNEL_RISE * Math.sqrt(1 - (track.distance / excavationWidth) ** 2);
             if (high > track.height + 0.22 && low < roof) return;
           }
         }
@@ -553,8 +571,16 @@ function addTrack(
     if (!span?.electrified || span.tunnel) continue;
     const { position, tangent } = rail.pose(station);
     const side = new Vector3().crossVectors(tangent, UP).normalize();
-    const post = position.clone().addScaledVector(side, 3.2);
-    const foot = post.clone().setY(span.bridge ? position.y - 0.43 : Math.min(position.y - 0.45, elevationAt(data, post.x, post.z)));
+    const setbacks = span.bridge ? [2.62, 3.2, 4.4, 6.4] : [3.2, 4.4, 6.4, 8.4, 10.4, 12.4];
+    const offset = setbacks.flatMap(setback => [setback, -setback]).find(candidate => {
+      const point = position.clone().addScaledVector(side, candidate);
+      return (nearby(point.x, point.z)?.distance ?? Infinity) >= 2.55;
+    });
+    if (offset === undefined) continue;
+    const post = position.clone().addScaledVector(side, offset);
+    const outward = side.clone().multiplyScalar(Math.sign(offset));
+    const foot = post.clone().setY(span.bridge ? position.y - 0.43
+      : Math.min(position.y - 0.45, gradedHeight(data, nearby, post.x, post.z)));
     const top = post.clone().setY(position.y + 7.25);
     const anchor = position.clone().setY(position.y + 6.2);
     posts.push(beam(foot, top, 0.22, 0.19));
@@ -562,7 +588,7 @@ function addTrack(
     posts.push(beam(top.clone().setY(position.y + 5.64), position.clone().setY(position.y + 5.42), 0.078));
     posts.push(beam(top.clone().setY(position.y + 6.8), anchor, 0.088));
     posts.push(beam(anchor, position.clone().setY(position.y + 5.42), 0.041));
-    porcelain.push(beam(top.clone().setY(position.y + 6.8), top.clone().addScaledVector(side, -0.45).setY(position.y + 6.7), 0.16));
+    porcelain.push(beam(top.clone().setY(position.y + 6.8), top.clone().addScaledVector(outward, -0.45).setY(position.y + 6.7), 0.16));
   }
   for (let distance = 0; distance < rail.length; distance += 5) {
     const finish = Math.min(distance + 5, rail.length);
@@ -592,22 +618,24 @@ function addTrack(
   const tunnelSurface = material(0x403e3a, 0.96);
   const insideSection: [number, number][] = Array.from({ length: 17 }, (_, i) => {
     const angle = Math.PI * i / 16;
-    return [-3.75 * Math.cos(angle), 1.42 + 4.8 * Math.sin(angle)];
+    return [-TUNNEL_HALF_WIDTH * Math.cos(angle), TUNNEL_SPRINGLINE + TUNNEL_RISE * Math.sin(angle)];
   });
-  insideSection.unshift([-3.75, -0.48]);
-  insideSection.push([3.75, -0.48]);
+  insideSection.unshift([-TUNNEL_HALF_WIDTH, -0.48]);
+  insideSection.push([TUNNEL_HALF_WIDTH, -0.48]);
   tunnelSurface.side = DoubleSide;
   lining.side = DoubleSide;
   const bridgeDetail: Transform[] = [];
   for (const span of bedSpans) {
     if (!span.bridge && !span.tunnel) continue;
     if (span.bridge) {
-      group.add(crossSection(rail, span, [
+      const deck = crossSection(rail, span, [
         [-2.82, 0.55], [-2.82, -0.4], [-2.36, -0.77], [2.36, -0.77], [2.82, -0.4], [2.82, 0.55],
-      ], lining));
-      group.add(crossSection(rail, span, [
+      ], lining);
+      const girder = crossSection(rail, span, [
         [-2.35, -0.54], [-2.11, -1.02], [2.11, -1.02], [2.35, -0.54],
-      ], concrete));
+      ], concrete);
+      deck.name = girder.name = 'Bridge deck';
+      group.add(deck, girder);
       const length = span.end - span.start;
       const supports = 1 + Math.floor(length / 24);
       for (const distance of [
@@ -623,10 +651,12 @@ function addTrack(
         piers.push(support);
       }
       for (const side of [-1, 1]) {
-        group.add(crossSection(rail, span, [
+        const railing = crossSection(rail, span, [
           [side * 2.70 - 0.04, 0.91], [side * 2.70 - 0.03, 0.99],
           [side * 2.70 + 0.03, 0.99], [side * 2.70 + 0.04, 0.91],
-        ], steel));
+        ], steel);
+        railing.name = 'Bridge railing';
+        group.add(railing);
         for (let distance = span.start + 0.5; distance < span.end; distance += 2.35) {
           const { position, tangent } = rail.pose(distance);
           const edge = position.addScaledVector(tangent.cross(UP).normalize(), side * 2.70);
@@ -636,7 +666,8 @@ function addTrack(
     } else {
       const bore = crossSection(rail, span, insideSection, tunnelSurface, 3);
       bore.name = 'Tunnel bore';
-      const floor = crossSection(rail, span, [[-3.77, -0.48], [3.77, -0.48]], tunnelSurface, 3);
+      const floor = crossSection(rail, span,
+        [[-TUNNEL_HALF_WIDTH - 0.02, -0.48], [TUNNEL_HALF_WIDTH + 0.02, -0.48]], tunnelSurface, 3);
       floor.name = 'Tunnel bore';
       group.add(bore, floor);
       const outsideSection = insideSection.map(([x, y]): [number, number] => [x * 1.13, y * 1.1 + 0.05]);
@@ -673,6 +704,9 @@ function addTrack(
     const batches = spatialBatches(entries, 360, entry => [entry.position.x, entry.position.z]);
     for (const batch of batches) {
       const detail = aggregate(box, surface, batch);
+      if (entries === posts || entries === porcelain) detail.name = 'Catenary support';
+      if (entries === piers) detail.name = 'Bridge pier';
+      if (entries === bridgeDetail) detail.name = 'Bridge railing';
       detail.castShadow = entries !== fasteners && entries !== conductors;
       if (entries === ties || entries === fasteners) {
         limited.push({ mesh: detail, radius: entries === ties ? 520 : 220 });
@@ -790,9 +824,13 @@ function addParallelTracks(
     aggregate(box, material(0x756f62, 0.86), sleepers),
   );
   if (feet.length) {
-    const masts = aggregate(box, material(0x6d7165, 0.64, 0.53), feet);
-    masts.castShadow = true;
-    group.add(masts);
+    const steel = material(0x6d7165, 0.64, 0.53);
+    for (const batch of spatialBatches(feet, 360, entry => [entry.position.x, entry.position.z])) {
+      const masts = aggregate(box, steel, batch);
+      masts.name = 'Catenary support';
+      masts.castShadow = true;
+      group.add(masts);
+    }
   }
   if (wires.length) group.add(aggregate(box, material(0x363e38, 0.61, 0.66), wires));
 }
@@ -814,12 +852,13 @@ function appendWall(
   base: number,
   height: number,
   color: Color,
+  endBase = base,
+  endHeight = height,
 ) {
   const index = batches.walls.length / 3;
-  batches.walls.push(a[0], base, -a[1], b[0], base, -b[1], a[0], height, -a[1], b[0], height, -b[1]);
+  batches.walls.push(a[0], base, -a[1], b[0], endBase, -b[1], a[0], height, -a[1], b[0], endHeight, -b[1]);
   const u = Math.hypot(b[0] - a[0], b[1] - a[1]) / 1.8;
-  const v = (height - base) / 2.8;
-  batches.wallUv.push(0, 0, u, 0, 0, v, u, v);
+  batches.wallUv.push(0, 0, u, 0, 0, (height - base) / 2.8, u, (endHeight - endBase) / 2.8);
   for (let corner = 0; corner < 4; corner++) batches.colors.push(color.r, color.g, color.b);
   batches.wallIndices.push(index, index + 1, index + 2, index + 1, index + 3, index + 2);
 }
@@ -1006,12 +1045,74 @@ function addBuildingCluster(
   }
 }
 
+function platformDeck(
+  outline: LocalPoint[],
+  levelAt: (x: number, z: number) => number,
+  surface: MeshStandardMaterial,
+  followsRail: boolean,
+) {
+  const shape = triangles(outline);
+  if (!followsRail) return mesh(outline.flatMap(([x, y]) => [x, levelAt(x, -y), -y]), shape, surface);
+  const points = [...outline];
+  const indices: number[] = [];
+  const split = (a: number, b: number, c: number) => {
+    const ids = [a, b, c];
+    const edgeLengths = ids.map((id, edge) => {
+      const [x, y] = points[id];
+      const [u, v] = points[ids[(edge + 1) % 3]];
+      return (x - u) ** 2 + (y - v) ** 2;
+    });
+    const longest = Math.max(...edgeLengths);
+    if (longest <= 64) {
+      indices.push(a, b, c);
+      return;
+    }
+    const edge = edgeLengths.indexOf(longest);
+    const left = ids[edge];
+    const right = ids[(edge + 1) % 3];
+    const opposite = ids[(edge + 2) % 3];
+    const middle = points.length;
+    points.push([(points[left][0] + points[right][0]) * 0.5, (points[left][1] + points[right][1]) * 0.5]);
+    split(left, middle, opposite);
+    split(middle, right, opposite);
+  };
+  for (let index = 0; index < shape.length; index += 3) split(shape[index], shape[index + 1], shape[index + 2]);
+  return mesh(points.flatMap(([x, y]) => [x, levelAt(x, -y), -y]), indices, surface);
+}
+
+function platformLoadingGauge(outline: LocalPoint[], nearby: ReturnType<typeof routeIndex>) {
+  const gauge = 1.85;
+  const center = centerOf(outline);
+  return outline.flatMap(([east, north], index) => {
+    const [nextEast, nextNorth] = outline[(index + 1) % outline.length];
+    const length = Math.hypot(nextEast - east, nextNorth - north);
+    const segments = Math.max(1, Math.ceil(length / 3));
+    return Array.from({ length: segments }, (_, step): LocalPoint => {
+      const blend = step / segments;
+      const x = east + (nextEast - east) * blend;
+      const z = -(north + (nextNorth - north) * blend);
+      const rail = nearby(x, z);
+      if (!rail || rail.distance >= gauge) return [x, -z];
+      const [dx, dy] = rail.heading;
+      const tangentLength = Math.hypot(dx, dy);
+      const lateralX = dy / tangentLength;
+      const lateralZ = dx / tangentLength;
+      const offset = (x - rail.east) * lateralX + (z - rail.worldZ) * lateralZ;
+      const centerOffset = (center[0] - rail.east) * lateralX - (center[1] + rail.worldZ) * lateralZ;
+      const side = Math.sign(Math.abs(offset) > 0.02 ? offset : centerOffset) || 1;
+      const shift = side * gauge - offset;
+      return [x + lateralX * shift, -(z + lateralZ * shift)];
+    });
+  });
+}
+
 function addPlatforms(
   group: Group,
   data: WorldData,
   rail: Rail,
   concrete: MeshStandardMaterial,
   platformLights: MeshStandardMaterial,
+  nearby: ReturnType<typeof routeIndex>,
 ) {
   const topMaterial = material(0x696b67, 0.91);
   topMaterial.side = DoubleSide;
@@ -1020,56 +1121,90 @@ function addPlatforms(
   const posts: Transform[] = [];
   const lamps: Transform[] = [];
   const bulbs: PointLight[] = [];
-  const platforms: { outline: LocalPoint[]; level: number }[] = [];
+  const platforms: { outline: LocalPoint[]; levelAt: (x: number, z: number) => number }[] = [];
   const stripe = material(0xd5bb6c, 0.85);
   const metal = material(0x3d4950, 0.63, 0.46);
   const geometry = new BoxGeometry();
   for (const feature of data.features) {
     if (feature.type !== 'platform') continue;
-    const outline = contours(data, polygon(feature.points));
-    if (outline.length < 3) continue;
-    const center = centerOf(outline);
+    const footprint = contours(data, polygon(feature.points));
+    if (footprint.length < 3) continue;
+    const center = centerOf(footprint);
     const station = data.stations.reduce<typeof data.stations[number] | undefined>((closest, candidate) => {
       if (!closest) return candidate;
       const distance = Math.hypot(center[0] - candidate.position[0], center[1] - candidate.position[1]);
       const previousDistance = Math.hypot(center[0] - closest.position[0], center[1] - closest.position[1]);
       return distance < previousDistance ? candidate : closest;
     }, undefined);
-    const ground = elevationAt(data, center[0], -center[1]);
-    const nearbyStation = station && Math.hypot(center[0] - station.position[0], center[1] - station.position[1]) < 170;
-    const trackHeight = nearbyStation ? rail.position(station.stopDistance).y : ground - 0.4;
-    const level = Math.max(ground + 0.24, trackHeight + 0.64);
-    platforms.push({ outline, level });
-    const surface = outline.flatMap(([x, y]) => [x, level, -y]);
-    const top = mesh(surface, triangles(outline), topMaterial);
+    const railPlatform = feature.tags.railway === 'platform' || feature.tags.train === 'yes';
+    const followsRail = railPlatform && Boolean(nearby.footprintRailHeights(footprint));
+    const outline = followsRail ? platformLoadingGauge(footprint, nearby) : footprint;
+    const taggedHeight = Number.parseFloat(feature.tags.height ?? feature.tags['railway:platform:height'] ?? '');
+    const platformRise = taggedHeight > 0.15 && taggedHeight < 1.4 ? taggedHeight : 0.64;
+    const datum = followsRail ? undefined : elevationAt(data, center[0], -center[1]) + 0.24;
+    const levelAt = (x: number, z: number) => {
+      if (datum !== undefined) return datum;
+      const ground = gradedHeight(data, nearby, x, z) + 0.24;
+      const track = nearby(x, z);
+      if (!track) return ground;
+      const fade = smoothstep((20 - track.distance) / 8);
+      return ground + (track.height + platformRise - ground) * fade;
+    };
+    platforms.push({ outline, levelAt });
+    const top = platformDeck(outline, levelAt, topMaterial, followsRail);
     const trim: BuildingBatches = { walls: [], wallIndices: [], wallUv: [], colors: [], roofs: [], roofIndices: [], roofUv: [] };
     const grey = new Color(0xffffff);
     for (let index = 0; index < outline.length; index++) {
       const a = outline[index];
       const b = outline[(index + 1) % outline.length];
-      const origin = coordinate(a, level + 0.008);
-      const end = coordinate(b, level + 0.008);
-      appendWall(trim, a, b, Math.min(level - 0.7, ground - 0.15), level, grey);
+      const origin = coordinate(a, 0);
+      const end = coordinate(b, 0);
       const delta = end.clone().sub(origin);
       const length = delta.length();
+      if (!length) continue;
       const along = delta.clone().normalize();
       const normal = along.clone().cross(UP);
       const middle = origin.clone().addScaledVector(along, length * 0.5);
+      middle.y = levelAt(middle.x, middle.z);
       if (!inside([middle.x + normal.x * 0.2, -(middle.z + normal.z * 0.2)], outline)) normal.negate();
-      if (length > 1) {
+      const sections = followsRail ? Math.ceil(length / 4) : 1;
+      for (let section = 0; section < sections; section++) {
+        const first = origin.clone().addScaledVector(delta, section / sections);
+        const last = origin.clone().addScaledVector(delta, (section + 1) / sections);
+        first.y = levelAt(first.x, first.z);
+        last.y = levelAt(last.x, last.z);
+        const bottom = (point: Vector3) => Math.min(point.y - 0.7, gradedHeight(data, nearby, point.x, point.z) - 0.15);
+        appendWall(trim, [first.x, -first.z], [last.x, -last.z], bottom(first), first.y, grey, bottom(last), last.y);
+        if (length <= 1) continue;
+        const stripeDirection = last.clone().sub(first);
         stripes.push({
-          position: middle.clone().addScaledVector(normal, 0.18),
-          scale: new Vector3(length, 0.014, 0.115),
-          rotation: new Quaternion().setFromUnitVectors(X, along),
+          position: first.clone().lerp(last, 0.5).addScaledVector(normal, 0.18).add(new Vector3(0, 0.008, 0)),
+          scale: new Vector3(stripeDirection.length(), 0.014, 0.115),
+          rotation: new Quaternion().setFromUnitVectors(X, stripeDirection.normalize()),
         });
       }
 
-      if (length < 25 || !station) continue;
+    }
+    for (let index = 0; index < footprint.length; index++) {
+      if (!station) break;
+      const a = footprint[index];
+      const b = footprint[(index + 1) % footprint.length];
+      const origin = coordinate(a, 0);
+      const delta = coordinate(b, 0).sub(origin);
+      const length = delta.length();
+      if (length < 25) continue;
+      const along = delta.normalize();
+      const normal = along.clone().cross(UP);
+      const middle = origin.clone().addScaledVector(along, length * 0.5);
+      middle.y = levelAt(middle.x, middle.z);
+      if (!inside([middle.x + normal.x * 0.2, -(middle.z + normal.z * 0.2)], footprint)) normal.negate();
       const track = rail.position(station.stopDistance);
       if (middle.distanceTo(track) > 150 || normal.dot(track.clone().sub(middle)) > 0) continue;
       const luminaires = Math.min(5, Math.max(1, Math.floor(length / 36)));
       for (let i = 0; i < luminaires; i++) {
         const foot = origin.clone().addScaledVector(along, length * (i + 0.5) / luminaires).addScaledVector(normal, 0.7);
+        if (!inside([foot.x, -foot.z], outline)) continue;
+        foot.y = levelAt(foot.x, foot.z);
         const mast = foot.clone().add(new Vector3(0, 4.1, 0));
         const hood = mast.clone().addScaledVector(normal, 0.62).add(new Vector3(0, -0.1, 0));
         posts.push(beam(foot, mast, 0.11), beam(mast, hood, 0.052));
@@ -1082,28 +1217,39 @@ function addPlatforms(
         }
       }
     }
-    group.add(top, mesh(trim.walls, trim.wallIndices, concrete));
+    const edge = mesh(trim.walls, trim.wallIndices, concrete);
+    top.name = 'Platform deck';
+    edge.name = 'Platform edge';
+    group.add(top, edge);
   }
 
   for (const station of data.stations) {
-    const { position, tangent } = rail.pose(station.stopDistance);
-    const side = tangent.clone().cross(UP).normalize();
+    const position = rail.position(station.stopDistance);
+    const incoming = position.clone().sub(rail.position(station.stopDistance - 6)).setY(0);
+    const outgoing = rail.position(station.stopDistance + 6).sub(position).setY(0);
+    const along = (incoming.lengthSq() > 1e-5 ? incoming : outgoing).normalize();
+    if (along.lengthSq() === 0) continue;
+    const side = along.clone().cross(UP);
     const center = coordinate(station.position, position.y);
     if (center.clone().sub(position).dot(side) < 0) side.negate();
-    const along = tangent.clone().setY(0).normalize();
-    const sign = position.clone().addScaledVector(side, 5.45).add(new Vector3(0, 2.15, 0));
-    const candidates = [5.4, 5, 4.6, 4.2, 3.8, 3.4, 3, 2.6].flatMap(offset =>
-      [0, -3, 3, -6, 6].map(distance =>
+    const candidates = [5.4, 5, 4.6, 4.2, 3.8, 3.4, 3, 2.6, 6.5, 8.0, -5.4, -6.5, -8.0]
+      .flatMap(offset => [0, -3, 3, -6, 6].map(distance =>
         position.clone().addScaledVector(side, offset).addScaledVector(along, distance),
-      ),
-    );
+      ))
+      .filter(candidate => [-1.6, 0, 1.6].every(edge => {
+        const point = candidate.clone().addScaledVector(along, edge);
+        return (nearby(point.x, point.z)?.distance ?? Infinity) >= 2.3;
+      }));
+    const sign = candidates[0]?.clone();
+    if (!sign) continue;
+    sign.y = Math.max(position.y + 2.15, gradedHeight(data, nearby, sign.x, sign.z) + 1.55);
     for (const candidate of candidates) {
       const platform = platforms.find(({ outline }) => [-1.32, 0, 1.32].every((edge) => {
         const foot = candidate.clone().addScaledVector(along, edge);
         return inside([foot.x, -foot.z], outline);
       }));
       if (platform) {
-        sign.copy(candidate).setY(platform.level + 1.55);
+        sign.copy(candidate).setY(platform.levelAt(candidate.x, candidate.z) + 1.55);
         break;
       }
     }
@@ -1133,6 +1279,7 @@ function addPlatforms(
     const board = new Mesh(new BoxGeometry(3.2, 0.75, 0.095), [metal, metal, metal, metal, face, face]);
     board.quaternion.copy(rotation);
     board.position.copy(sign);
+    board.name = 'Platform furniture';
     group.add(board);
     for (const edge of [-1.32, 1.32]) {
       const post = sign.clone().addScaledVector(along, edge);
@@ -1141,9 +1288,15 @@ function addPlatforms(
     }
   }
 
-  if (stripes.length) group.add(aggregate(geometry, stripe, stripes));
-  if (posts.length) group.add(aggregate(geometry, metal, posts));
-  if (lamps.length) group.add(aggregate(geometry, platformLights, lamps));
+  for (const [surface, entries] of [
+    [stripe, stripes], [metal, posts], [platformLights, lamps],
+  ] satisfies [MeshStandardMaterial, Transform[]][]) {
+    for (const batch of spatialBatches(entries, 180, entry => [entry.position.x, entry.position.z])) {
+      const furniture = aggregate(geometry, surface, batch);
+      furniture.name = 'Platform furniture';
+      group.add(furniture);
+    }
+  }
   return bulbs;
 }
 
@@ -1494,9 +1647,12 @@ function addSignals(
   for (const feature of data.features) {
     if (feature.type !== 'signal' || !feature.points.length) continue;
     const point = feature.points[0];
-    const [east, north] = feature.heading ?? [0, 0];
-    const heading = new Vector3(east, 0, -north).normalize();
     const foot = coordinate(point, 0);
+    const alignment = feature.heading ? undefined : nearest(foot.x, foot.z);
+    const [east, north] = feature.heading ?? alignment?.heading ?? [0, 0];
+    const heading = new Vector3(east, 0, -north).normalize();
+    if (alignment && (alignment.span.direction === 'backward') !==
+      (feature.tags['railway:signal:direction'] === 'backward')) heading.negate();
     if (heading.lengthSq() > 0) {
       const side = new Vector3().crossVectors(heading, UP);
       const offsets = [2.85, -2.85, 2.08, -2.08, 3.65, -3.65];
@@ -1753,7 +1909,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   addForests(group, data, nearby, foliage, distantFoliage, placement?.ownsCell);
   const grass = addTracksideGrass(group, data, rail, nearby);
   const setSignal = addSignals(group, data, nearby);
-  const bulbs = addPlatforms(group, data, rail, concrete, fixtures);
+  const bulbs = addPlatforms(group, data, rail, concrete, fixtures, nearby);
   group.traverse(object => {
     object.updateMatrix();
     object.matrixAutoUpdate = false;
@@ -1802,6 +1958,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
 function indexClearanceMeshes(objects: Object3D[]) {
   const cellSize = 160;
   const cells = new Map<string, Object3D[]>();
+  const objectBounds = new Map<Object3D, Box3>();
   const bounds = new Box3();
   const insert = (x: number, z: number, object: Object3D) => {
     const key = `${x}:${z}`;
@@ -1821,25 +1978,35 @@ function indexClearanceMeshes(objects: Object3D[]) {
     }
     if (!localBounds || localBounds.isEmpty()) continue;
     bounds.copy(localBounds).applyMatrix4(object.matrixWorld).expandByScalar(0.001);
+    objectBounds.set(object, bounds.clone());
     for (let x = Math.floor(bounds.min.x / cellSize); x <= Math.floor(bounds.max.x / cellSize); x++) {
       for (let z = Math.floor(bounds.min.z / cellSize); z <= Math.floor(bounds.max.z / cellSize); z++) {
         insert(x, z, object);
       }
     }
   }
-  return (first: Vector3, last = first) => {
-    const minX = Math.floor(Math.min(first.x, last.x) / cellSize);
-    const maxX = Math.floor(Math.max(first.x, last.x) / cellSize);
-    const minZ = Math.floor(Math.min(first.z, last.z) / cellSize);
-    const maxZ = Math.floor(Math.max(first.z, last.z) / cellSize);
-    if (minX === maxX && minZ === maxZ) return cells.get(`${minX}:${minZ}`) ?? [];
-    const candidates = new Set<Object3D>();
-    for (let x = minX; x <= maxX; x++) {
-      for (let z = minZ; z <= maxZ; z++) {
-        for (const object of cells.get(`${x}:${z}`) ?? []) candidates.add(object);
+  const rayBounds = new Box3();
+  return (first: Vector3, last?: Vector3) => {
+    const end = last ?? first;
+    const minX = Math.floor(Math.min(first.x, end.x) / cellSize);
+    const maxX = Math.floor(Math.max(first.x, end.x) / cellSize);
+    const minZ = Math.floor(Math.min(first.z, end.z) / cellSize);
+    const maxZ = Math.floor(Math.max(first.z, end.z) / cellSize);
+    let candidates: Iterable<Object3D>;
+    if (minX === maxX && minZ === maxZ) {
+      candidates = cells.get(`${minX}:${minZ}`) ?? [];
+    } else {
+      const distinct = new Set<Object3D>();
+      for (let x = minX; x <= maxX; x++) {
+        for (let z = minZ; z <= maxZ; z++) {
+          for (const object of cells.get(`${x}:${z}`) ?? []) distinct.add(object);
+        }
       }
+      candidates = distinct;
     }
-    return [...candidates];
+    if (!last) return [...candidates];
+    rayBounds.makeEmpty().expandByPoint(first).expandByPoint(last);
+    return [...candidates].filter(object => objectBounds.get(object)?.intersectsBox(rayBounds));
   };
 }
 
@@ -1914,7 +2081,11 @@ export function auditVehicleClearance(group: Group, rail: Rail, spacing = 2) {
   if (!Number.isFinite(spacing) || spacing <= 0) throw new Error('Positive clearance sample spacing is required');
   const terrain = group.getObjectByName('Graded Copernicus DEM');
   if (!terrain) throw new Error('The scene is missing rendered terrain');
-  const structures = new Set(['Tunnel portal', 'Tunnel bore', 'OSM building walls', 'OSM building roofs', 'Railway signal']);
+  const structures = new Set([
+    'Tunnel portal', 'Tunnel bore', 'OSM building walls', 'OSM building roofs', 'Railway signal',
+    'Catenary support', 'Bridge deck', 'Bridge pier', 'Bridge railing',
+    'Platform deck', 'Platform edge', 'Platform furniture',
+  ]);
   const obstacles = [...terrain.children, ...group.children.filter(object => structures.has(object.name))];
   const hits: Intersection[] = [];
   const direction = new Vector3();

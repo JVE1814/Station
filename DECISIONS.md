@@ -14,4 +14,5 @@
 - Interpret OSM signal nodes on a railway way as chainage references. Place the pole beside the nearest track with clearance from adjacent tracks, while retaining the mapped signal node and direction in data.
 - Use dated same-direction Entur journeys for moving traffic on the main route. Treat repeated use of an OSM way in the Kristiansand reversal as one physical block lock.
 - Preserve mapped building footprints when an inferred roof overlaps the railway. Use an operational passage 7.2 m wide and 6.7 m high where needed, respect mapped minimum heights and leave canopy sides open.
+- Mesh platform decks along the adjacent surveyed alignment. Adjust a mapped platform edge only where the raw footprint intrudes into the 1.85 m loading-gauge setback. Place generated signals, catenary supports and station furniture outside the nearest running alignments.
 - Use a cubic plan spline bounded to 0.35 m from the source polyline between samples. Compute longitudinal grades from the fitted height profile over its distance along the track.

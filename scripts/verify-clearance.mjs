@@ -26,7 +26,10 @@ scenery.group.traverse(object => {
 });
 const bed = auditTrackbed(scenery.group, rail, data);
 const body = auditVehicleClearance(scenery.group, rail);
-console.log(`Trackbed: ${bed.sampleCount} samples, ${bed.maxGap.toFixed(3)} m maximum gap, ${bed.missingCount} missing.`);
-console.log(`Coach envelope: ${body.samples} samples, ${body.intersections} terrain, tunnel or building intersections.`);
+if (process.argv.includes('--json')) console.log(JSON.stringify({ bed, body }));
+else {
+  console.log(`Trackbed: ${bed.sampleCount} samples, ${bed.maxGap.toFixed(3)} m maximum gap, ${bed.missingCount} missing.`);
+  console.log(`Coach envelope: ${body.samples} samples, ${body.intersections} intersections with terrain, tunnels, buildings, signals, bridges, platforms or catenary supports.`);
+}
 assert.ok(bed.sampleCount > 0 && bed.missingCount === 0 && bed.maxGap <= 0.5);
 assert.ok(body.samples > 0 && body.intersections === 0, JSON.stringify(body.first));

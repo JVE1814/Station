@@ -166,6 +166,13 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - Enlarged the world stop marker and kept it beside the stopped train while passengers board. Reduced cab glass glare from its own lamp and softened the overexposed rail illumination at night.
 - Hero captures now reuse one production scene. A focused test checks that every camera pose matches a fresh camera, and the browser capture asserts the rendered chainage for each frame.
 
+## Second gallery review and full keyboard run
+
+- Both independent reviewers scored all fourteen updated frames. The lowest category rose from 1/10 to 2/10. The lake’s fan-shaped shading is gone. The bridge’s angular bank and low train visibility in the night overlook remain the biggest gaps. [Review A](reference/r40/review-a.md) · [Review B](reference/r40/review-b.md)
+- Rebuilt and checked all eight matched comparison strips and six weather versions, including the new exact before frames and paint-overs for the tunnel and lake overlook.
+- The keyboard reviewer completed all six practice steps and manually drove all three stops. Their Voss card shows Grade C, 71/100, 1.2 m stopping error and 39 passengers carried. The HUD now surfaces door permission across the full platform tolerance and offers terminal door closure after dwell. A focused test exercises both cues.
+- The first full verification passed the data checks, both sets of clearance audits, the R40 and intercity replays, the High graphics workload check and gallery checks. The intercity browser test timed out waiting for Bird’s-eye view. Camera transitions now advance on wall-clock time, and the offline browser check reports the current stage and any page errors on failure. Its rerun is in progress.
+
 - Graduated trackside tree height from maintained suckers to mature woodland. In the same lakeside scene, the tallest rooted tree within 14 m of rail fell from 17.56 m to 2.78 m, and the tallest within 26 m fell from 18.95 m to 5.01 m. The mapped forest footprint and shrub exclusions still apply.
 - Added autumn colour within the birch shader using leaf chroma before any instance tint. In the original cutout, the mask strongly selected 75% of the sampled opaque canopy pixels and selected zero of the 4,023 sampled bare-stem pixels. Pine and spruce bypass the autumn mask.
 

@@ -23,6 +23,7 @@ export type PlantKind = 'spruce' | 'pine' | 'birch' | 'willow' | 'grass' | 'fern
 
 export interface Plant {
   kind: PlantKind;
+  dry: number;
   east: number;
   north: number;
   height: number;
@@ -231,10 +232,26 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
   const accepted = (x: number, y: number) =>
     inBounds(x, y, extent) && (options.ownsCell?.(x, -y) ?? true) && !excluded(x, y);
   const plants: Plant[] = [];
-  const growth = (x: number, y: number, kind: PlantKind, height: number, width: number, seed: number) => ({
-    kind, east: x, north: y, height, width, rotation: hash(seed, 59, 19) * 2 * Math.PI,
+  const growth = (x: number, y: number, kind: PlantKind, height: number, width: number, seed: number, dry = 0) => ({
+    kind, dry, east: x, north: y, height, width, rotation: hash(seed, 59, 19) * 2 * Math.PI,
     tint: 0.65 + hash(seed, 15, 23) * 0.35,
   });
+
+  const groundSlope = (x: number, y: number) => Math.hypot(
+    groundHeight(terrain, x + 2, y) - groundHeight(terrain, x - 2, y),
+    groundHeight(terrain, x, y + 2) - groundHeight(terrain, x, y - 2),
+  ) / 4;
+  const dryBank = (x: number, y: number, railHeight: number, slope = groundSlope(x, y)) =>
+    slope >= 0.20 && groundHeight(terrain, x, y) > railHeight + 0.4
+      && (!woodAt(x, y) || distanceToTrack(x, y) <= 22);
+  const placeDry = (x: number, y: number, roll: number, seed: number) => {
+    const kind = roll < 0.54 ? 'grass' : 'willow';
+    const height = 0.19 + hash(seed, 18, 49) * (kind === 'grass' ? 0.47 : 0.41);
+    const width = height * (kind === 'grass' ? 1.32 : 2.12);
+    if (distanceToTrack(x, y) < (kind === 'willow' ? 5.8 : 3.05) + width * 0.55) return;
+    const tone = (kind === 'grass' ? 0.42 : 0.73) + hash(seed, 74, 13) * 0.25;
+    plants.push(growth(x, y, kind, height, width, seed, tone));
+  };
 
   const approaches = collectRailApproaches(rail);
   const placeTree = (x: number, y: number, row: number, col: number, variant: number) => {
@@ -289,6 +306,10 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
         const y = -along.z - side * shoulder.z * offset;
         if (!accepted(x, y)) continue;
         const roll = hash(seed, strip, side + 17);
+        if (dryBank(x, y, along.y)) {
+          placeDry(x, y, roll, seed + strip * 24 + side);
+          continue;
+        }
         const kind = strip === 0 || roll < 0.25 ? 'grass' : roll < 0.53 ? 'fern'
           : roll < 0.77 ? 'fireweed' : 'willow';
         const height = kind === 'willow' ? 0.8 + 1.4 * roll : kind === 'fireweed'
@@ -307,12 +328,13 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
           const x = along.x + side * shoulder.x * (offset + jitter) + shoulder.z * alongShift;
           const y = -along.z - side * shoulder.z * (offset + jitter) + shoulder.x * alongShift;
           if (!accepted(x, y)) continue;
-          const slope = Math.hypot(
-            groundHeight(terrain, x + 2, y) - groundHeight(terrain, x - 2, y),
-            groundHeight(terrain, x, y + 2) - groundHeight(terrain, x, y - 2),
-          ) / 4;
-          if (slope > 0.70) continue;
+          const slope = groundSlope(x, y);
+          if (slope > 0.82) continue;
           const mix = hash(patch, stem + side * 61, 97);
+          if (dryBank(x, y, along.y, slope)) {
+            placeDry(x, y, mix, patch * 37 + side * stem);
+            continue;
+          }
           const kind = mix < 0.68 ? 'willow' : mix < 0.87 ? 'fern' : 'fireweed';
           const height = kind === 'willow' ? 1.15 + 1.42 * mix : 0.52 + 0.53 * mix;
           const width = height * (kind === 'willow' ? 1.62 : 1.26);
@@ -690,7 +712,13 @@ float goldMask = smoothstep(0.020, 0.17, greenSeparation)
   * smoothstep(0.009, 0.039, leafColor.g - leafColor.b);
 float greenValue = max(0.03, leafColor.g);
 vec3 autumnGold = vec3(2.52, 1.37, 0.19) * greenValue;
-diffuseColor.rgb = mix(leafColor, autumnGold, goldMask * vBirchAutumn);`)
+vec3 autumn = mix(leafColor, autumnGold, goldMask * max(vBirchAutumn, 0.0));
+float dryAmount = max(-vBirchAutumn, 0.0);
+float dryValue = dot(leafColor, vec3(0.29, 0.56, 0.15));
+vec3 tawnyGrass = vec3(2.3, 1.55, 0.66) * dryValue;
+vec3 russetHeath = vec3(1.53, 0.92, 0.55) * dryValue;
+vec3 heath = mix(tawnyGrass, russetHeath, smoothstep(0.60, 0.88, dryAmount));
+diffuseColor.rgb = mix(autumn, heath, smoothstep(0.0, 0.43, dryAmount) * 0.93);`)
       .replace('#include <color_fragment>', `#include <color_fragment>
 float inLeaf = smoothstep(0.16, 0.58, vPlantTip);
 float leafTone = max(diffuseColor.g, diffuseColor.r);
@@ -722,7 +750,7 @@ function buildBatch(plants: Plant[], base: BufferGeometry, detailedBase: BufferG
     atlas[index * 4 + 1] = tile < 4 ? 0.5 : 0;
     atlas[index * 4 + 2] = plant.rotation * 2.35;
     const succession = Math.sin(plant.east * 0.016 + Math.sin(plant.north * 0.021));
-    atlas[index * 4 + 3] = plant.kind === 'birch' ? 0.68 + 0.21 * succession + plant.tint * 0.10 : 0;
+    atlas[index * 4 + 3] = plant.kind === 'birch' ? 0.68 + 0.21 * succession + plant.tint * 0.10 : -plant.dry;
     dummy.position.set(plant.east, heightAt(plant.east, -plant.north) - 0.085, -plant.north);
     dummy.rotation.y = plant.rotation;
     dummy.scale.set(plant.width, plant.height, plant.width);

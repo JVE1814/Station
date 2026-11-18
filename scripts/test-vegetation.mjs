@@ -47,6 +47,22 @@ test('woodland and understory respect mapped no-growth areas and streamed tile o
     !(plant.east >= -80 && plant.east <= -40 && plant.north >= -80 && plant.north <= -40)));
 });
 
+test('steep exposed slopes carry compact dry plants while mature woodland stays green', () => {
+  const hillside = {
+    ...data,
+    features: data.features.filter(feature => feature.type !== 'forest'),
+    terrain: { ...data.terrain, samples: data.terrain.samples.map((_, i) =>
+      10 + Math.max(0, i % 21 - 10) * 3.4) },
+  };
+  const rail = new Rail(hillside.rail);
+  const dry = placeVegetation(hillside, rail).filter(plant => plant.dry > 0);
+  assert.ok(dry.length > 20);
+  assert.ok(dry.every(plant => plant.east > 0 && plant.height < 0.68 &&
+    ['grass', 'willow'].includes(plant.kind)));
+  assert.deepEqual(placeVegetation({ ...hillside, features: data.features }, rail)
+    .filter(plant => plant.dry > 0 && plant.east > 43), []);
+});
+
 test('the baked R40 woodland supports distinct species and varied shoulder plants', async () => {
   const world = JSON.parse(await readFile('public/data/service.json', 'utf8'));
   const plants = placeVegetation(world, new Rail(world.rail));
@@ -82,7 +98,7 @@ test('woodland detail is exclusive and wind updates matching shadow depth geomet
       assert.equal(color.vertexShader, depth.vertexShader);
       assert.match(color.vertexShader, /lookFrom.y \/ max\(0.01, length\(lookFrom\)\)/);
       assert.match(color.vertexShader, /smoothstep\(0.52, 0.77, viewElevation\)/);
-      assert.match(color.fragmentShader, /goldMask \* vBirchAutumn/);
+      assert.match(color.fragmentShader, /goldMask \* max\(vBirchAutumn, 0.0\)/);
       assert.equal(near.geometry.getAttribute('plantAtlas').itemSize, 4);
       assert.equal(color.uniforms.plantTime, depth.uniforms.plantTime);
       assert.equal(color.uniforms.plantTime.value, 0.2);

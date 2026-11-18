@@ -152,3 +152,5 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 
 - Graduated trackside tree height from maintained suckers to mature woodland. In the same lakeside scene, the tallest rooted tree within 14 m of rail fell from 17.56 m to 2.78 m, and the tallest within 26 m fell from 18.95 m to 5.01 m. The mapped forest footprint and shrub exclusions still apply.
 - Added autumn colour within the birch shader using leaf chroma before any instance tint. In the original cutout, the mask strongly selected 75% of the sampled opaque canopy pixels and selected zero of the 4,023 sampled bare-stem pixels. Pine and spruce bypass the autumn mask.
+
+- Replaced tall, cool-green foreground plants with shorter tawny tussocks and dark russet scrub on steep, exposed rail banks. The open maintenance strip remains eligible where a broader OSM woodland polygon covers the embankment. Woodland boundaries, tree placements and clearance checks remain unchanged. At lakeside chainage 8.7 km, 130 of the plants within 80 m now use the dry-bank treatment. Vegetation count did not increase on that tile. Typecheck, targeted lint and all four vegetation tests passed.

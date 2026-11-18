@@ -8,6 +8,8 @@ Full-size PNGs are captured from the browser at 1920 × 1080. The 3840 × 1080 c
 | Chase | [Compare](comparisons/chase-day.jpg) · [1080p](chase-day.png) | [Compare](comparisons/chase-night.jpg) · [1080p](chase-night.png) | [Compare](comparisons/chase-snow.jpg) · [1080p](chase-snow.png) |
 | Bird’s-eye | [Compare](comparisons/map-day.jpg) · [1080p](map-day.png) | [Compare](comparisons/map-night.jpg) · [1080p](map-night.png) | [Compare](comparisons/map-snow.jpg) · [1080p](map-snow.png) |
 
+The [snowy platform zoom](map-snow-platform.png) shows Seimsgrend from the close Bird’s-eye scale.
+
 The [latest capture log](r40-final-captures.txt) records all nine views, zero console errors and zero external requests. The [first capture log](r40-captures.txt), [night lighting iteration](r40-night-refresh.txt) and [initial verification run](r40-initial-verify.txt) record earlier checkpoints.
 
 [Intercity replay output](intercity-replays.txt) records the three route lengths, station and rail position errors, scheduled station calls, AI departures, stopping errors and velocity-derived jerk.

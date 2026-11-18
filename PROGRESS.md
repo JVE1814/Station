@@ -104,3 +104,9 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - `npm run verify -- --captures` exited successfully. Clean install, TypeScript, lint, all 24 tests, the static build, three intercity replays, every scenery tile and all three offline intercity browser checks passed.
 - At 1920 × 1080, the SwiftShader renderer-thread CPU proxy measured 6.32 ms in the cab, 5.54 ms in chase and 4.94 ms in Bird’s-eye view at p95. The transcript includes the longer software wall-frame intervals.
 - Captured the nine final camera and weather combinations near the Bulken tunnel exit. Chromium reported zero console errors and zero external requests. All 12 required captures passed the 1080p dimension check.
+
+## Evanger–Voss driving model
+
+- Added controller and brake-pipe lag, separate rain and snow adhesion, forward signal and speed-change previews, live approach advice, boarding dwell and results for each call, a final grade and an interactive keyboard lesson.
+- Passed five new driving tests and all seven existing dynamics, manual driving and service tests. The new cases include a full three-call fixture drive in dry, wet and snowy conditions with no emergency stops, under four metres of stopping error and the existing jerk threshold. TypeScript and lint passed for the driving changes.
+- On the original mapped pair, the dry R40 profile matched the previous automatic replay at 190.50 seconds, 1.91 metres stopping error and 0.550 m/s³ peak jerk. Full-route replay and in-browser keyboard review await the Evanger–Voss bake and interface integration.

@@ -15,6 +15,38 @@ export interface DriverControls {
   doorsOpen: boolean;
 }
 
+export type RailSurface = 'clear' | 'rain' | 'snow';
+
+interface Grip {
+  traction: number;
+  brake: number;
+}
+
+const dryGrip: Grip = { traction: 1, brake: 1 };
+export const railGrip: Record<RailSurface, Grip> = {
+  clear: dryGrip,
+  rain: { traction: 0.82, brake: 0.83 },
+  snow: { traction: 0.61, brake: 0.67 },
+};
+
+function ramp(value: number, target: number, rise: number, fall: number): number {
+  return Math.max(value - STEP / fall, Math.min(value + STEP / rise, target));
+}
+
+/** Traction demand and the brake pipe settle separately from controller positions. */
+export class CabEffort {
+  readonly applied: DriverControls = { throttle: 0, brake: 1, doorsOpen: false };
+
+  update(command: DriverControls, direct: boolean): DriverControls {
+    const applied = this.applied;
+    const power = command.brake > 0 || command.doorsOpen ? 0 : command.throttle;
+    applied.brake = direct ? command.brake : ramp(applied.brake, command.brake, 0.82, 0.65);
+    applied.throttle = direct ? power : ramp(applied.throttle, power, 1.15, 0.5);
+    applied.doorsOpen = command.doorsOpen;
+    return applied;
+  }
+}
+
 function fullTraction(speed: number): number {
   return 0.8 / (1 + speed / 32);
 }
@@ -28,21 +60,23 @@ export function applyAcceleration(
   speed: number,
   gradient: number,
   acceleration: number,
+  grip = dryGrip,
 ): void {
   const effort = acceleration + resistance(speed, gradient);
-  controls.throttle = Math.max(0, Math.min(1, effort / fullTraction(speed)));
-  controls.brake = Math.max(0, Math.min(1, -effort / SERVICE_DECELERATION));
+  controls.throttle = Math.max(0, Math.min(1, effort / (fullTraction(speed) * grip.traction)));
+  controls.brake = Math.max(0, Math.min(1, -effort / (SERVICE_DECELERATION * grip.brake)));
 }
 
 export function stepTrain(
   state: TrainState,
   controls: DriverControls,
   gradient: number,
+  grip = dryGrip,
 ): TrainState {
   const traction = controls.brake > 0 || controls.doorsOpen
     ? 0
-    : controls.throttle * fullTraction(state.speed);
-  const effort = traction - controls.brake * SERVICE_DECELERATION - resistance(state.speed, gradient);
+    : controls.throttle * fullTraction(state.speed) * grip.traction;
+  const effort = traction - controls.brake * SERVICE_DECELERATION * grip.brake - resistance(state.speed, gradient);
   const jerkStep = COMFORT_JERK * STEP;
   // Preserve enough speed to release the remaining deceleration before standstill.
   const stoppingEnvelope = jerkStep - Math.sqrt(jerkStep ** 2 + 2 * COMFORT_JERK * state.speed);

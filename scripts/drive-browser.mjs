@@ -75,9 +75,33 @@ try {
         open, { timeout: 15_000, polling: 100 });
     };
 
+    await press('t');
+    await press('t');
+    const waitForPractice = heading => page.waitForFunction(title => document.getElementById('training-title').textContent === title
+      && !document.getElementById('training').hidden, heading, { timeout: 60_000, polling: 120 });
+    await press('l');
+    await waitForPractice('Release the brake');
+    await setNotch(-5, 'e', 'q');
+    await waitForPractice('Move off');
+    await setNotch(3, 'w', 's');
+    await waitForPractice('Feel the train coast');
+    await setNotch(-3, 'w', 's');
+    await waitForPractice('Come to a stop');
+    await setNotch(3, 'e', 'q');
+    await waitForPractice('Operate the doors');
+    await switchDoors(true);
+    await waitForPractice('See the train from outside');
+    await switchDoors(false);
+    await press('2');
+    await waitForPractice('Ready for Evanger–Voss');
+    await press('r');
+    await page.waitForFunction(() => document.getElementById('training').hidden
+      && document.getElementById('next-stop').textContent.includes('Seimsgrend'), null,
+    { timeout: 45_000, polling: 120 });
+    await waitForView('cab');
+    console.log('Completed all six practice steps and returned to Evanger by keyboard.');
+
     const departure = await state();
-    await press('t');
-    await press('t');
     await setControls(departure, 5, 0);
     await page.waitForFunction(() => Number(document.getElementById('speed').textContent) >= 5, null,
       { timeout: 60_000, polling: 120 });

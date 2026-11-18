@@ -39,3 +39,19 @@ I opened a fresh R40 session, used the six-step practice, then drove from Evange
 - `Within stop zone · D to open doors` was the reliable cue at all three stops. Voss accepted a halt that displayed 3 m this time, with a card error of 2.8 m. The earlier run also displayed 3 m before the cue, then required a short crawl. The rounded distance by itself leaves the cue necessary. This run did not pass a stop marker, so it adds no evidence about the past-marker display.
 - At 960×600 the speed panel overlapped the Dismiss button on all three result cards. A pointer click at the center of the Seimsgrend Dismiss button left the card open during the next leg. Each card’s values were readable, and driving and boarding continued.
 - After the full terminal dwell, Voss showed `Service complete · D to close doors`. D closed the doors and the cue changed to `Service complete · R to retry`, with 0 aboard.
+
+## Final production build playtest
+
+I used a fresh R40 session on the final production port, completed practice, and drove with the game’s keyboard controls on Low at 960×600. This pass took about 20 minutes wall time through the retry check. I completed Seimsgrend and Bulken, then missed Voss.
+
+| Stop | Score | Lateness | Stopping error | Passengers |
+|---|---:|---:|---:|---|
+| [Seimsgrend](final-run/01-seimsgrend-result.png) | 83 / 100 | 93 s late | 0.9 m | 10 boarded · 7 alighted |
+| [Bulken](final-run/02-bulken-result.png) | 61 / 100 | 197 s late | 2.2 m | 4 boarded · 2 alighted |
+| [Voss missed stop](final-run/03-voss-stop-missed.png) | — | — | 95 m past marker at the halt | 30 aboard |
+
+- At Seimsgrend, pressing D at 18 km/h produced `Stop the train before opening the doors.` At Bulken, a deliberate stationary halt 21 m short produced `Stop at the platform marker before opening the doors.` After I crept to a displayed 2 m and stopped, `Within stop zone · D to open doors` appeared and boarding worked. The stop-zone cue was clearer than the rounded speed and distance alone.
+- Both result cards advertised `Dismiss Esc`, and a physical Escape press dismissed each card. The button was fully visible above the driving HUD. The top of each card slightly covered the bottom of the service picker at this viewport.
+- The bright STOP signs were much easier to spot. At the halt the signs occupied much of the right half of the cab windshield, where the pillar interrupted the label. Around 974 m from Bulken, the HUD suggested `Power 5 · Aim for 110 km/h` while separately showing `40 km/h in 757 m`. I used the upcoming speed change to plan the slower approach.
+- A long HUD stall interrupted my Voss approach on 5×. I misread the brake setting and applied one notch at 88 m and 44 km/h, then applied full brake too late. The HUD reported `8 m past marker` and `Stop missed · R to retry` while the train was still moving. The failure screenshot records the final halt at 95 m past the marker.
+- Pressing R returned to the Evanger departure at `08:01:00`, with 0 km/h, power 0, brake 5, 25 aboard, 1×, and Seimsgrend 7,563 m ahead. The previous result and failure presentation was cleared.

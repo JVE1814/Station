@@ -1,4 +1,5 @@
 import type { SignalAspect } from './blocks';
+import { SERVICE_DECELERATION, fullTraction, resistance } from './dynamics.ts';
 import type { DriverControls, TrainState, RailSurface } from './dynamics';
 
 export const PLATFORM_TOLERANCE = 7;
@@ -48,7 +49,7 @@ function approachSpeed(distance: number, finalSpeed: number, deceleration: numbe
 export function brakingGuidance(input: GuidanceInput): BrakingGuidance {
   const { state, gradient, brakeGrip, tractionGrip, stopDistance, signalDistance, restrictions } = input;
   const slope = gradient * 9.81;
-  const serviceBrake = 0.95 * brakeGrip;
+  const serviceBrake = SERVICE_DECELERATION * brakeGrip;
   const comfortable = Math.max(0.14, 0.33 * brakeGrip + slope);
   let recommended = Math.max(0, input.currentLimit - 3) / 3.6;
   let target: BrakingGuidance['target'] = 'line';
@@ -75,11 +76,10 @@ export function brakingGuidance(input: GuidanceInput): BrakingGuidance {
   if (recommended === 0) {
     return { target, recommendedSpeed: 0, powerNotch: 0, brakeNotch: 5 };
   }
-  const roadResistance = 0.012 + state.speed ** 2 * 0.000019 + slope;
   const projected = Math.max(0, state.speed + 0.62 * state.acceleration);
   const correction = (recommended - projected) / (recommended < 2 ? 1.3 : 2.4);
-  const effort = correction + roadResistance;
-  const traction = tractionGrip * 0.8 / (1 + state.speed / 32);
+  const effort = correction + resistance(state.speed, gradient);
+  const traction = fullTraction(state.speed) * tractionGrip;
   return {
     target,
     recommendedSpeed: recommended * 3.6,

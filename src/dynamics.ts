@@ -47,11 +47,11 @@ export class CabEffort {
   }
 }
 
-function fullTraction(speed: number): number {
+export function fullTraction(speed: number): number {
   return 0.8 / (1 + speed / 32);
 }
 
-function resistance(speed: number, gradient: number): number {
+export function resistance(speed: number, gradient: number): number {
   return 0.012 + speed ** 2 * 0.000019 + 9.81 * gradient;
 }
 

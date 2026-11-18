@@ -1091,6 +1091,113 @@ function appendGabledRoof(batches: BuildingBatches, roof: GabledRoof, height: nu
   }
 }
 
+function isWaitingShelter(feature: WorldData['features'][number]) {
+  return feature.type === 'building' && feature.tags.amenity === 'shelter'
+    && ['public_transport', undefined].includes(feature.tags.shelter_type);
+}
+
+function addWaitingShelters(
+  group: Group, data: WorldData, platforms: PassengerPlatform[], siding?: Texture,
+) {
+  const timber = material(0x915e47, 0.85);
+  timber.map = timber.bumpMap = siding ?? null;
+  timber.bumpScale = 0.014;
+  const trim = material(0xb58a63, 0.78);
+  const hardware = material(0x363c3c, 0.65, 0.5);
+  const roofing = material(0x3a3d3b, 0.87);
+  roofing.side = DoubleSide;
+  const box = new BoxGeometry();
+  const timberParts: Transform[] = [];
+  const trimParts: Transform[] = [];
+  const metalParts: Transform[] = [];
+  for (const feature of data.features.filter(isWaitingShelter)) {
+    const outline = polygon(feature.points);
+    if (outline.length < 3) continue;
+    const footprint = outline.map(point => coordinate(point, 0));
+    const edges = footprint.map((point, index) => footprint[(index + 1) % footprint.length].clone().sub(point));
+    const along = edges.reduce((longest, edge) => edge.lengthSq() > longest.lengthSq() ? edge : longest).normalize();
+    if (!along.lengthSq()) continue;
+    const facing = new Vector3(-along.z, 0, along.x);
+    const bounds = (axis: Vector3) => {
+      const values = footprint.map(point => point.dot(axis));
+      return { min: Math.min(...values), max: Math.max(...values) };
+    };
+    const span = bounds(along);
+    let depth = bounds(facing);
+    const mid = (span.min + span.max) / 2;
+    const locate = (x: number, z: number) => along.clone().multiplyScalar(x).addScaledVector(facing, z);
+    const frontDeck = (direction: number) => [0.24, 0.55, 1].reduce((best, margin) => {
+      const edge = locate(mid, direction > 0 ? depth.max + margin : depth.min - margin);
+      return best ?? platforms.find(platform => inside([edge.x, -edge.z], platform.outline));
+    }, undefined as PassengerPlatform | undefined);
+    const positiveDeck = frontDeck(1);
+    const negativeDeck = frontDeck(-1);
+    const center = locate(mid, (depth.min + depth.max) / 2);
+    const farSide = negativeDeck && !positiveDeck;
+    if (farSide) {
+      facing.negate();
+      depth = bounds(facing);
+    }
+    const deck = (farSide ? negativeDeck : positiveDeck);
+    const width = span.max - span.min;
+    const length = depth.max - depth.min;
+    if (width < 1.4 || length < 0.85) continue;
+    const threshold = locate(mid, depth.max + 0.05);
+    const base = deck?.levelAt(threshold.x, threshold.z) ?? elevationAt(data, center.x, center.z);
+    if (deck) {
+      (deck.occupied ??= []).push({ position: center, radius: Math.hypot(width, length) / 2 });
+    }
+    const header = 2.35;
+    const roofHeight = (z: number) => base + header - 0.28 * (depth.max - z) / length;
+    const rotation = new Quaternion().setFromUnitVectors(X, along);
+    const part = (x: number, y: number, z: number, w: number, h: number, d: number): Transform => ({
+      position: locate(x, z).setY(base + y), scale: new Vector3(w, h, d), rotation,
+    });
+    const roof = mesh(footprint.flatMap(point => [point.x, roofHeight(point.dot(facing)), point.z]),
+      triangles(outline), roofing);
+    roof.name = 'Platform furniture';
+    roof.castShadow = true;
+    group.add(roof);
+    for (let i = 0; i < footprint.length; i++) {
+      const start = footprint[i];
+      const end = footprint[(i + 1) % footprint.length];
+      const fascia = beam(start.clone().setY(roofHeight(start.dot(facing)) - 0.052),
+        end.clone().setY(roofHeight(end.dot(facing)) - 0.052), 0.082, 0.105);
+      metalParts.push(fascia);
+    }
+    const rear = depth.min + 0.08;
+    const front = depth.max - 0.08;
+    for (const x of [span.min + 0.08, span.max - 0.08]) {
+      for (const z of [rear, front]) {
+        const postHeight = roofHeight(z) - base;
+        trimParts.push(part(x, postHeight / 2, z, 0.11, postHeight, 0.11));
+        metalParts.push(part(x, 0.065, z, 0.14, 0.13, 0.14));
+      }
+      timberParts.push(part(x, 1.03, rear + (front - rear) * 0.24, 0.062, 1.81, (front - rear) * 0.48));
+    }
+    timberParts.push(part(mid, 1.08, rear, width - 0.16, 1.91, 0.075));
+    if (!deck || !inside([center.x, -center.z], deck.outline)) {
+      trimParts.push(part(mid, -0.067, (rear + front) / 2, width - 0.15, 0.13, length - 0.12));
+    }
+    if (feature.tags.bench === 'yes') {
+      const benchWidth = Math.min(1.86, width - 0.32);
+      for (const x of [mid - benchWidth * 0.39, mid + benchWidth * 0.39]) {
+        metalParts.push(part(x, 0.23, rear + 0.3, 0.06, 0.46, 0.34));
+        metalParts.push(part(x, 0.68, rear + 0.09, 0.06, 0.47, 0.055));
+      }
+      for (const z of [0.14, 0.25, 0.36, 0.47]) trimParts.push(part(mid, 0.46, rear + z, benchWidth, 0.055, 0.094));
+      for (const y of [0.68, 0.8, 0.92]) trimParts.push(part(mid, y, rear + 0.11, benchWidth, 0.088, 0.048));
+    }
+  }
+  for (const [surface, parts] of [[timber, timberParts], [trim, trimParts], [hardware, metalParts]] as const) {
+    if (!parts.length) continue;
+    const fixtures = aggregate(box, surface, parts);
+    fixtures.name = 'Platform furniture';
+    fixtures.castShadow = true;
+    group.add(fixtures);
+  }
+}
+
 function addBuildings(
   group: Group,
   data: WorldData,
@@ -1110,7 +1217,8 @@ function addBuildings(
   facade.vertexColors = true;
   facade.side = DoubleSide;
   roofsSurface.side = DoubleSide;
-  const buildings = data.features.filter(feature => feature.type === 'building' && feature.points.length >= 3);
+  const buildings = data.features.filter(feature => feature.type === 'building' && feature.points.length >= 3
+    && (!polished || !isWaitingShelter(feature)));
   const large = buildings.length > 1800;
   const batches = large ? spatialBatches(buildings, 340, feature => feature.points[0]) : [buildings];
   for (const batch of batches) {
@@ -2343,6 +2451,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   const grass = vegetation ? undefined : addTracksideGrass(group, data, rail, nearby);
   const setSignal = addSignals(group, data, nearby);
   const { bulbs, platforms, setPlatformWeather } = addPlatforms(group, data, rail, concrete, fixtures, nearby, polished, maps.siding);
+  if (polished) addWaitingShelters(group, data, platforms, maps.siding);
   const passengers = polished ? createPassengers(data.stations, platforms, rail, placement?.ownsCell) : undefined;
   if (passengers) group.add(passengers.group);
   group.traverse(object => {

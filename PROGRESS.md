@@ -154,3 +154,8 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - Added autumn colour within the birch shader using leaf chroma before any instance tint. In the original cutout, the mask strongly selected 75% of the sampled opaque canopy pixels and selected zero of the 4,023 sampled bare-stem pixels. Pine and spruce bypass the autumn mask.
 
 - Replaced tall, cool-green foreground plants with shorter tawny tussocks and dark russet scrub on steep, exposed rail banks. The open maintenance strip remains eligible where a broader OSM woodland polygon covers the embankment. Woodland boundaries, tree placements and clearance checks remain unchanged. At lakeside chainage 8.7 km, 130 of the plants within 80 m now use the dry-bank treatment. Vegetation count did not increase on that tile. Typecheck, targeted lint and all four vegetation tests passed.
+
+## Seimsgrend waiting shelter
+
+- Rebuilt the R40 waiting shelter on mapped footprint 512804977. Its opening faces the adjoining timber deck, with the tagged bench under a shallow dark roof. Corner posts stand on metal shoes, and rear and side screens provide cover. The model uses the same platform furniture collision checks as the other fixtures.
+- On the Seimsgrend–Bulken tile, 1,707 trackbed probes found a maximum gap of 0.316 m with zero misses. All 26,820 coach-clearance probes passed. TypeScript, targeted lint, and five boarding and roof tests passed.

@@ -862,6 +862,7 @@ function addParallelTracks(
   data: WorldData,
   nearby: ReturnType<typeof routeIndex>,
   ballast: MeshStandardMaterial,
+  polished = false,
 ) {
   const ballastVertices: number[] = [];
   const ballastUv: number[] = [];
@@ -897,20 +898,37 @@ function addParallelTracks(
   };
   for (const feature of data.features) {
     if (feature.type !== 'track' || feature.tags.tunnel && feature.tags.tunnel !== 'no') continue;
-    const path = feature.points;
-    const railPoint = (point: LocalPoint) => {
+    const path = polished ? feature.points.flatMap((point, index, source) => {
+      if (!index) return [point];
+      const previous = source[index - 1];
+      const count = Math.ceil(Math.hypot(point[0] - previous[0], point[1] - previous[1]) / 2.5);
+      return Array.from({ length: count }, (_, index): LocalPoint => {
+        const t = (index + 1) / count;
+        return [previous[0] + (point[0] - previous[0]) * t, previous[1] + (point[1] - previous[1]) * t];
+      });
+    }) : feature.points;
+    const railPoint = (point: LocalPoint, before: LocalPoint, after: LocalPoint) => {
       const center = coordinate(point, 0);
       const alignment = nearby(center.x, center.z);
       const ground = elevationAt(data, center.x, center.z) + 0.22;
       const blend = alignment && !alignment.span.tunnel && !alignment.span.bridge
         ? smoothstep((15 - alignment.distance) / 11) : 0;
-      return center.setY(ground + ((alignment?.height ?? ground) - ground) * blend);
+      const design = ground + ((alignment?.height ?? ground) - ground) * blend;
+      if (!polished) return center.setY(design);
+      const lateral = coordinate(after, 0).sub(coordinate(before, 0)).cross(UP).normalize();
+      // Preserve the turnout tie-in to the main alignment. Beyond it, clear the full sleeper width.
+      const turnout = alignment && !alignment.span.tunnel ? smoothstep((alignment.distance - 1.85) / 1.1) : 1;
+      const terrain = Math.max(...[-1.1, 0, 1.1].map(offset =>
+        gradedHeight(data, nearby, center.x + lateral.x * offset, center.z + lateral.z * offset)));
+      return center.setY(design + Math.max(0, terrain + 0.43 - design) * turnout);
     };
+    const positions = path.map((point, index) =>
+      railPoint(point, path[Math.max(0, index - 1)], path[Math.min(path.length - 1, index + 1)]));
     let nextTie = 0.2;
     let nextPole = 16;
-    for (let index = 1; index < path.length; index++) {
-      const from = railPoint(path[index - 1]);
-      const to = railPoint(path[index]);
+    for (let index = 1; index < positions.length; index++) {
+      const from = positions[index - 1];
+      const to = positions[index];
       const delta = to.clone().sub(from);
       const length = delta.length();
       if (length < 0.015) continue;
@@ -954,10 +972,9 @@ function addParallelTracks(
   if (!railVertices.length) return;
   const box = new BoxGeometry();
   if (ballastVertices.length) group.add(mesh(ballastVertices, ballastIndices, ballast, undefined, ballastUv));
-  group.add(
-    mesh(railVertices, railIndices, material(0x69747a, 0.31, 0.78)),
-    aggregate(box, material(0x756f62, 0.86), sleepers),
-  );
+  const ties = aggregate(box, material(0x756f62, 0.86), sleepers);
+  ties.name = 'Parallel track sleepers';
+  group.add(mesh(railVertices, railIndices, material(0x69747a, 0.31, 0.78)), ties);
   if (feet.length) {
     const steel = material(0x6d7165, 0.64, 0.53);
     for (const batch of spatialBatches(feet, 360, entry => [entry.position.x, entry.position.z])) {
@@ -1324,9 +1341,10 @@ function addBuildingCluster(
       }
     }
     const taggedRoofColor = feature.tags['roof:colour'];
-    const roofPalette = [0x655c58, 0x483e3f, 0x73706d, 0x6a4943, 0x514b49, 0x777974];
+    const roofPalette = [0x877c73, 0x696466, 0x858783, 0x8a695f, 0x797674, 0x8f9594];
     const roofColor = polished ? new Color(taggedRoofColor && /^#[0-9a-f]{6}$/i.test(taggedRoofColor)
       ? taggedRoofColor : roofPalette[Math.floor(random() * roofPalette.length)]) : undefined;
+    if (roofColor && !taggedRoofColor && outline.length > 20) roofColor.lerp(new Color(0xa9a49c), 0.4);
     const roof = gabled ? gabledRoof(outline, roofRise, feature.tags['roof:orientation'] === 'across') : undefined;
     if (roof && roofColor) appendGabledRoof(batches, roof, height, roofColor, color);
     else appendRoof(batches, outline, height, roofRise, holes, roofColor);
@@ -1351,10 +1369,10 @@ function platformDeck(
   outline: LocalPoint[],
   levelAt: (x: number, z: number) => number,
   surface: MeshStandardMaterial,
-  followsRail: boolean,
+  maxEdge?: number,
 ) {
   const shape = triangles(outline);
-  if (!followsRail) {
+  if (maxEdge === undefined) {
     return mesh(outline.flatMap(([x, y]) => [x, levelAt(x, -y), -y]), shape, surface, undefined,
       outline.flatMap(([x, y]) => [x / 3.8, y / 3.8]));
   }
@@ -1368,7 +1386,7 @@ function platformDeck(
       return (x - u) ** 2 + (y - v) ** 2;
     });
     const longest = Math.max(...edgeLengths);
-    if (longest <= 64) {
+    if (longest <= maxEdge ** 2) {
       indices.push(a, b, c);
       return;
     }
@@ -1530,20 +1548,24 @@ function addPlatforms(
     const taggedHeight = Number.parseFloat(feature.tags.height ?? feature.tags['railway:platform:height'] ?? '');
     const platformRise = taggedHeight > 0.15 && taggedHeight < 1.4 ? taggedHeight : 0.64;
     const datum = followsRail ? undefined : elevationAt(data, center[0], -center[1]) + 0.24;
+    const gradedDeck = polished && railPlatform;
     const levelAt = (x: number, z: number) => {
-      if (datum !== undefined) return datum;
+      if (datum !== undefined && !gradedDeck) return datum;
       const ground = gradedHeight(data, nearby, x, z) + 0.24;
+      if (datum !== undefined) return Math.max(datum, ground + 0.12);
       const track = nearby(x, z);
       if (!track) return ground;
       const fade = smoothstep((20 - track.distance) / 8);
-      return ground + (track.height + platformRise - ground) * fade;
+      const deck = ground + (track.height + platformRise - ground) * fade;
+      return polished && track.distance > 5 ? Math.max(deck, ground + 0.13 * smoothstep((track.distance - 5) / 3)) : deck;
     };
     const platform = { outline, levelAt, followsRail };
     platforms.push(platform);
     if (polished && station && Math.hypot(center[0] - station.position[0], center[1] - station.position[1]) < 115) {
       addPlatformAmenities(amenities, platform, feature.tags, rail, station.stopDistance, nearby);
     }
-    const top = platformDeck(outline, levelAt, polished && feature.tags.surface === 'wood' ? wood : topMaterial, followsRail);
+    const top = platformDeck(outline, levelAt, polished && feature.tags.surface === 'wood' ? wood : topMaterial,
+      gradedDeck ? 3 : followsRail ? 8 : undefined);
     const trim: BuildingBatches = {
       walls: [], wallIndices: [], wallUv: [], colors: [], roofs: [], roofIndices: [], roofUv: [], roofColors: [],
     };
@@ -1561,7 +1583,7 @@ function addPlatforms(
       const middle = origin.clone().addScaledVector(along, length * 0.5);
       middle.y = levelAt(middle.x, middle.z);
       if (!inside([middle.x + normal.x * 0.2, -(middle.z + normal.z * 0.2)], outline)) normal.negate();
-      const sections = followsRail ? Math.ceil(length / 4) : 1;
+      const sections = gradedDeck || followsRail ? Math.ceil(length / 4) : 1;
       for (let section = 0; section < sections; section++) {
         const first = origin.clone().addScaledVector(delta, section / sections);
         const last = origin.clone().addScaledVector(delta, (section + 1) / sections);
@@ -2436,7 +2458,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   group.add(terrain);
   const applyTrackDetail = addTrack(group, data, rail, ballast, concrete, nearby,
     exposedRock ? { surface: ground, paint } : undefined);
-  addParallelTracks(group, data, nearby, ballast);
+  addParallelTracks(group, data, nearby, ballast, polished);
   const releaseWater = addWater(group, data, water, polished, maps.waterReflection);
   addBuildings(group, data, windows, roofs, maps.siding, nearby, polished);
   const vegetation = polished ? createVegetation(data, rail, {

@@ -288,6 +288,12 @@ async function run(): Promise<void> {
   const nextStop = element('next-stop');
   const signal = element('signal');
   const mappedSignals = data.features.filter(feature => feature.type === 'signal' && feature.chainage !== undefined);
+  const tunnels = data.spans.filter(span => span.tunnel).reduce<{ start: number; end: number }[]>((portals, span) => {
+    const previous = portals.at(-1);
+    if (previous && span.start - previous.end < 0.01) previous.end = span.end;
+    else portals.push({ start: span.start, end: span.end });
+    return portals;
+  }, []);
   const clock = element('clock');
   const throttle = element<HTMLMeterElement>('power');
   const brake = element<HTMLMeterElement>('brake');
@@ -333,7 +339,14 @@ async function run(): Promise<void> {
         if (!visible.has(id)) consist.forEach(coach => { coach.group.visible = false; });
       }
     }
-    cameras.update(cab.group, cab.eye, elapsed, heightAt);
+    const chaseDistance = chainage + 19;
+    const portal = cameras.view === 'chase'
+      ? tunnels.find(span => chaseDistance >= span.start - 18 && chaseDistance <= span.end + 18)
+      : undefined;
+    const tunnel = portal && rail.pose(chaseDistance);
+    const transition = portal ? Math.min(1, (Math.min(chaseDistance - portal.start, portal.end - chaseDistance) + 18) / 18) : 0;
+    const weight = transition * transition * (3 - 2 * transition);
+    cameras.update(cab.group, cab.eye, elapsed, heightAt, tunnel && { ...tunnel, weight });
     if (overview) {
       const height = Math.max(0, cameras.camera.position.y - cab.group.position.y);
       const shown = cameras.view === 'map' && height > 1800;
@@ -346,6 +359,10 @@ async function run(): Promise<void> {
     scenery.update(visualTime, cameras.camera.position, chainage, cameras.mapFocus);
     renderer.render(scene, cameras.camera);
     if (now >= nextHud || paused) {
+      if (audit) {
+        world.dataset.drawCalls = String(renderer.info.render.calls);
+        world.dataset.triangles = String(renderer.info.render.triangles);
+      }
       world.dataset.stage = 'running';
       if (cameras.settled) world.dataset.view = cameras.view;
       world.dataset.chainage = chainage.toFixed(2);
@@ -354,6 +371,7 @@ async function run(): Promise<void> {
       const remaining = station ? station.stopDistance - chainage : 0;
       speed.textContent = String(Math.round(state.speed * 3.6));
       limit.textContent = String(service.trackSpan.speedLimit ?? '—');
+      limit.dataset.speeding = String(service.speeding);
       const authority = service.authority;
       let upcoming = '';
       for (const feature of mappedSignals) {
@@ -387,7 +405,7 @@ async function run(): Promise<void> {
       const result = score === null ? 'Service complete' : `Score ${score}/100`;
       notice.textContent = now < noticeUntil ? temporaryNotice
         : !station ? `${result} · ${Math.abs(service.stoppingError ?? 0).toFixed(1)} m stopping error${schedule}`
-          : remaining < -7 ? 'Stop missed' : '';
+          : remaining < -7 ? 'Stop missed' : service.speeding ? 'Above line speed' : '';
       nextHud = now + 100;
     }
     if (audit && !paused) {

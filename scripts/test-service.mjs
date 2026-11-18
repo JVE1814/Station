@@ -31,6 +31,25 @@ test('automatic service slows for a lower limit and stops near the marker', () =
   assert.ok(Math.abs(service.stoppingError) <= 5);
 });
 
+test('manual speeding reduces the score for the same stop', () => {
+  function driveApproach(limit) {
+    const service = new Service({
+      ...data, spans: [{ start: 0, end: 2300, speedLimit: limit }],
+    }, rail, { distance: 2176, speed: 6 });
+    const speedingAtEntry = service.speeding;
+    service.tick(15);
+    assert.ok(service.toggleDoors());
+    service.tick(1);
+    assert.equal(service.nextStop, undefined);
+    return { speedingAtEntry, score: service.score(service.arrivalTime) };
+  }
+  const lowLimit = driveApproach(10);
+  const highLimit = driveApproach(55);
+  assert.equal(lowLimit.speedingAtEntry, true);
+  assert.equal(highLimit.speedingAtEntry, false);
+  assert.ok(lowLimit.score < highLimit.score);
+});
+
 test('changing ends mirrors the lead reference onto the same physical alignment', () => {
   const reversed = new Rail([
     { distance: 0, east: 0, north: 0, height: 0 },

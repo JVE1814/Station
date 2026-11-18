@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
 import { preview } from 'vite';
 
 const server = await preview({ preview: { host: '127.0.0.1', port: 4176 } });
 try {
+  const route = JSON.parse(await readFile(new URL('../public/data/service.json', import.meta.url), 'utf8'));
+  const bridge = route.spans.find(span => span.bridge);
+  assert.ok(bridge, 'The checkpoint route has no mapped bridge');
   const browser = await chromium.launch({
     executablePath: process.env.CHROMIUM_PATH ?? '/usr/bin/chromium',
     args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
@@ -68,7 +71,9 @@ try {
     const snapshots = new Set();
     const cdp = await page.context().newCDPSession(page);
     await mkdir('evidence', { recursive: true });
+    let deadline = Date.now() + 18 * 60_000;
     const capture = async (name, view) => {
+      const started = Date.now();
       await keys('p');
       await page.setViewportSize({ width: 1920, height: 1080 });
       await keys(view === 'cab' ? '1' : '2');
@@ -84,8 +89,9 @@ try {
         await keys('1');
         await keys('p');
       }
+      deadline += Date.now() - started;
     };
-    const deadline = Date.now() + 18 * 60_000;
+    let bridgeApproach = false;
     let terminal = false;
     let crossed = 0;
     for (;;) {
@@ -105,6 +111,10 @@ try {
       }
       if (current.remaining <= 75 && !terminal) {
         terminal = true;
+        await keys('t');
+      }
+      if (!bridgeApproach && current.chainage >= bridge.start - 120 && current.chainage < bridge.end) {
+        bridgeApproach = true;
         await keys('t');
       }
 
@@ -130,6 +140,8 @@ try {
       if (current.structure === 'bridge' && !snapshots.has('bridge')) {
         snapshots.add('bridge');
         await capture('bridge', 'chase');
+        await keys('t');
+        await keys('t');
       }
       if (current.structure === 'tunnel' && current.chainage > 1885 && !snapshots.has('tunnel')) {
         snapshots.add('tunnel');

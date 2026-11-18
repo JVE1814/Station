@@ -45,3 +45,9 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 
 - Added the OSM relation call inventories to the baked source bundles and verified their exact stop IDs against the 136 station entries. The three full timetable replays passed again after adding the comparison.
 - Independently read the 136 names and coordinates from the pinned OSM extract. Inspected all omitted passenger or mixed-use landmarks within 350 m and traced seven to separate tracks. The commands, source digests and output are in `evidence/`.
+
+## Driving feedback and tunnel cameras
+
+- Added a line-speed warning and scoring penalty for sustained overspeed. A focused test drives two identical approaches under different limits and confirms the penalty changes the score.
+- Lowered the default chase camera and constrained its orbit inside mapped tunnel bores. Camera tests exercise the tunnel envelope, follow motion and view transitions.
+- Added headlight scattering in the beam and frame draw counts in timing output. TypeScript, lint, the focused tests and the production build passed. Frame timings and the complete accelerated browser drive are still running.

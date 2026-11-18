@@ -55,6 +55,7 @@ kbd { color: #cbd5d7; font: inherit; font-size: .79em; border: 1px solid #627078
 #speed { font-size: 39px; min-width: 1.4em; text-align: right; letter-spacing: -.035em; }
 .units { color: #c4d0d5; }
 .limit { border: 2px solid #e98770; border-radius: 50%; min-width: 32px; padding: 5px 4px; text-align: center; margin-left: 5px; }
+.limit[data-speeding="true"] { background: #9d3225; border-color: #ffc3ad; color: #fff6eb; }
 .controls-panel { padding: 4px 7px; display: grid; gap: 2px; }
 .control { display: flex; align-items: center; gap: 5px; }
 .control > span { width: 40px; }

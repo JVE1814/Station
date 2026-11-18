@@ -7,6 +7,7 @@ import {
   CanvasTexture,
   CircleGeometry,
   Color,
+  ConeGeometry,
   CylinderGeometry,
   DoubleSide,
   Group,
@@ -14,6 +15,7 @@ import {
   MeshStandardMaterial,
   PlaneGeometry,
   PointLight,
+  ShaderMaterial,
   SphereGeometry,
   SpotLight,
   Sprite,
@@ -393,6 +395,42 @@ function trainHeadlight(body: Group) {
   light.position.set(0, 1.64, -12.15);
   light.target.position.set(0, 0.70, -52);
   light.visible = false;
+  const length = 46;
+  const beam = new Mesh(
+    new ConeGeometry(Math.tan(0.135) * length, length, 24, 1, true),
+    new ShaderMaterial({
+      blending: AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+      vertexShader: `
+        varying vec3 viewNormal;
+        varying vec3 viewRay;
+        varying float distanceAlong;
+        void main() {
+          vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+          viewNormal = normalMatrix * normal;
+          viewRay = -viewPosition.xyz;
+          distanceAlong = 1.0 - uv.y;
+          gl_Position = projectionMatrix * viewPosition;
+        }`,
+      fragmentShader: `
+        varying vec3 viewNormal;
+        varying vec3 viewRay;
+        varying float distanceAlong;
+        void main() {
+          float facing = abs(dot(normalize(viewNormal), normalize(viewRay)));
+          float angle = smoothstep(0.04, 0.50, facing);
+          float falloff = smoothstep(0.0, 0.09, distanceAlong)
+            * (1.0 - smoothstep(0.18, 1.0, distanceAlong));
+          gl_FragColor = vec4(1.0, 0.77, 0.49, angle * falloff * 0.045);
+          #include <colorspace_fragment>
+        }`,
+    }),
+  );
+  const depression = Math.atan2(0.94, 39.85);
+  beam.rotateX(Math.PI / 2 - depression);
+  beam.position.set(0, -Math.sin(depression) * length / 2, -Math.cos(depression) * length / 2);
+  light.add(beam);
   body.add(light, light.target);
   return light;
 }

@@ -38,3 +38,18 @@ test('switching into the map animates from the current camera pose', () => {
   assert.ok(camera.camera.position.distanceTo(firstFrame) > 500);
   assert.ok(camera.settled);
 });
+
+test('chase orbit stays inside the bore when the tunnel constrains it', () => {
+  const cameras = new Cameras();
+  const train = new Group();
+  const eye = new Vector3(0.38, 2.70, -9.33);
+  const tunnel = { position: new Vector3(0, 0, -19), tangent: new Vector3(0, 0, -1), weight: 1 };
+  cameras.select('chase');
+  for (let frame = 0; frame < 60; frame++) cameras.update(train, eye, 1 / 60, undefined, tunnel);
+  cameras.drag(200, -120);
+  cameras.update(train, eye, 1 / 60, undefined, tunnel);
+  const position = cameras.camera.position;
+  assert.ok(Math.abs(position.x) <= 1.85);
+  assert.ok(position.y >= 2.3 && position.y < 3.1);
+  assert.equal(position.z, -19);
+});

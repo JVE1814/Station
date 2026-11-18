@@ -36,7 +36,7 @@ The static build serves its JavaScript, geometry and timetable locally. Gameplay
 | P | Pause or resume the game |
 | A | Toggle automatic driving |
 
-Start by releasing the brakes with Q, then apply power with W. Watch the speed limit and the distance to the next stop. Brake to a standstill at the stopping marker and open the doors to register the stop. The buttons in the top bar switch time of day and weather.
+Start by releasing the brakes with Q, then apply power with W. Watch the speed limit and the distance to the next stop. Sustained speeding reduces the score. Brake to a standstill at the stopping marker and open the doors to register the stop. The buttons in the top bar switch time of day and weather.
 
 ## Architecture
 

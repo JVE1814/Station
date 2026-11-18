@@ -7,6 +7,7 @@
 - Preserve a sourced approach beyond each stopping marker so the whole consist can follow rail at departure and arrival.
 - Use the 08:08 R40 trip from Entur's 18 November 2026 data for the first playable service. The committed timetable extract keeps the selected trip reproducible when the public GTFS bundle rotates.
 - Use the OSM maximum speed where it is tagged. The first autopilot uses a conservative 70 km/h fallback in untagged sections. The HUD shows a dash for the source speed in those sections.
+- Warn the driver above the tagged limit with a 2 km/h tolerance. Sustained excess speed reduces the service score by up to 20 points. Drivers control how and when to brake.
 - Constrain the DEM-derived first-pair rail profile to a 27‰ grade. The source tags supply plan alignment and structure extents, while the surface raster contains tree, cliff and deck artifacts. The grade bound removes abrupt source-surface artifacts without mirroring them in the railway.
 - Use one local azimuthal equidistant coordinate system for the entire intercity network, so each service shares the same overview map. Bake disjoint rail intervals and overlapping DEM coverage into gzip scenery tiles. The browser loads upcoming tiles from local static files.
 - Count passenger stations along the selected open physical alignment. Nearby platforms on separate routes enter the inventory only when mapped passenger-service membership connects them to the alignment. Keep all mapped stations separate from the calls on each dated service.

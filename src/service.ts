@@ -37,6 +37,7 @@ export class Service {
   private dwellUntil = 0;
   private discomfort = 0;
   private movingTime = 0;
+  private excessSpeed = 0;
   private spanIndex = 0;
   private referenceOffset = 0;
   reversals = 0;
@@ -99,12 +100,22 @@ export class Service {
     return this.data.spans[this.spanIndex];
   }
 
+  private speedingBy(speed: number): number {
+    const limit = this.trackSpan.speedLimit;
+    return limit == null ? 0 : Math.max(0, speed * 3.6 - limit - 2);
+  }
+
+  get speeding(): boolean {
+    return this.speedingBy(this.state.speed) > 0;
+  }
+
   score(scheduledRunSeconds: number): number | null {
     if (this.nextStop || this.arrivalTime === null || this.stoppingError === null) return null;
     const timing = Math.max(0, 1 - Math.abs(this.arrivalTime - scheduledRunSeconds) / 90);
     const stopping = Math.max(0, 1 - Math.abs(this.stoppingError) / 7);
     const comfort = Math.max(0, 1 - this.discomfort / Math.max(0.1, this.movingTime));
-    return Math.round(timing * 35 + stopping * 35 + comfort * 30);
+    const speedingPenalty = Math.min(20, this.excessSpeed / 20);
+    return Math.round(Math.max(0, timing * 35 + stopping * 35 + comfort * 30 - speedingPenalty));
   }
 
   toggleDoors(): boolean {
@@ -157,6 +168,7 @@ export class Service {
         this.discomfort += STEP * (Math.max(0, Math.abs(next.acceleration) - 0.65)
           + Math.max(0, jerk - 0.35));
         this.movingTime += STEP;
+        this.excessSpeed += this.speedingBy(next.speed) * STEP;
       }
       return next;
     });

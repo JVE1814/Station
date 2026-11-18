@@ -81,6 +81,10 @@ try {
         const result = costs[Math.ceil(costs.length * 0.95) - 1];
         stats.push([view, result]);
         console.log(`${view} p95: ${result.toFixed(2)} ms (${software ? 'main-thread CPU proxy' : 'frame interval'})`);
+        const loads = await page.locator('#world').evaluate(world => ({
+          draws: world.dataset.drawCalls, triangles: world.dataset.triangles,
+        }));
+        console.log(`  Last rendered frame: ${loads.draws} draw calls, ${loads.triangles} triangles.`);
       }
     }
 

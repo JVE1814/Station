@@ -2,6 +2,12 @@ import { Euler, Group, MathUtils, Matrix4, PerspectiveCamera, Quaternion, Spheri
 
 export type View = 'cab' | 'chase' | 'map';
 
+interface ChaseTunnel {
+  position: Vector3;
+  tangent: Vector3;
+  weight: number;
+}
+
 export class Cameras {
   readonly camera = new PerspectiveCamera(63, 1, 0.06, 18000);
   view: View = 'cab';
@@ -13,9 +19,10 @@ export class Cameras {
   private readonly up = new Vector3(0, 1, 0);
   private readonly target = new Vector3();
   private readonly offset = new Vector3();
+  private readonly tunnelPosition = new Vector3();
   private readonly rotation = new Euler(0, 0, 0, 'YXZ');
   private mapGround: number | undefined;
-  private readonly orbit = new Spherical(30, 1.18, 2.35);
+  private readonly orbit = new Spherical(24, 1.40, 2.48);
   private readonly mapOffset = new Vector3(0, 530, 0);
   private mapLimit = 14000;
   private cabYaw = 0;
@@ -79,7 +86,8 @@ export class Cameras {
     }
   }
 
-  update(cab: Group, eye: Vector3, elapsed: number, groundAt?: (x: number, z: number) => number | undefined): void {
+  update(cab: Group, eye: Vector3, elapsed: number, groundAt?: (x: number, z: number) => number | undefined,
+    tunnel?: ChaseTunnel): void {
     if (this.view === 'cab') {
       this.destination.copy(eye).applyQuaternion(cab.quaternion).add(cab.position);
       this.rotation.set(this.cabPitch, this.cabYaw, 0);
@@ -88,6 +96,13 @@ export class Cameras {
       this.target.set(0, 2.0, -4).applyQuaternion(cab.quaternion).add(cab.position);
       this.offset.setFromSpherical(this.orbit).applyQuaternion(cab.quaternion);
       this.destination.copy(this.target).add(this.offset);
+      if (tunnel) {
+        const lateral = Math.sin(this.orbit.theta) * 1.85;
+        const height = 2.3 + Math.cos(this.orbit.phi) * 0.8;
+        this.tunnelPosition.set(tunnel.tangent.z * lateral, height, -tunnel.tangent.x * lateral)
+          .add(tunnel.position);
+        this.destination.lerp(this.tunnelPosition, tunnel.weight);
+      }
     } else {
       this.target.copy(cab.position);
       this.target.x += this.mapOffset.x;

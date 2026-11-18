@@ -49,3 +49,18 @@ test('overlapping stream tiles can share complete non-overlapping river cells', 
   const boundary = mesh => mesh.points.filter(point => point[0] === 8).map(point => point[1]).sort((a, b) => a - b);
   assert.deepEqual(boundary(west), boundary(east));
 });
+
+test('local terrain correction keeps its bank and hole area and joins the unchanged coarse surface', () => {
+  const outline = [[0, 0], [24, 0], [24, 16], [0, 16]];
+  const hole = [[1, 5], [3, 5], [3, 7], [1, 7]];
+  const triangulation = ShapeUtils.triangulateShape(outline.map(point => new Vector2(...point)),
+    [hole.map(point => new Vector2(...point))]).flat();
+  const original = buildRiverSurface([...outline, ...hole], triangulation, () => 0, 8, [0, 0]);
+  const refined = buildRiverSurface([...outline, ...hole], triangulation, () => 0, 8, [0, 0], undefined, {
+    refine: east => east < 8,
+    floor: east => Math.max(0, 1 - Math.abs(east - 4) / 2),
+  });
+  assert.ok(Math.abs(area(refined) - area(original)) < 1e-6);
+  assert.equal(Math.max(...refined.heights), 1.12);
+  assert.ok(refined.points.every(([x], index) => x < 8 || refined.heights[index] === 0.12));
+});

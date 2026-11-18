@@ -33,6 +33,7 @@ import type { GabledRoof } from './roof.ts';
 import { blendExposedRock, civilTexture, dustHighPeaks } from './scenery-materials.ts';
 import { applyWaterBanks, createShorelineField } from './lake-surface.ts';
 import { buildRiverSurface } from './river-surface.ts';
+import type { RiverTerrainCorrection } from './river-surface.ts';
 import { createVossStreets, sampleVossStreetTerrain } from './voss-streets.ts';
 import type { VossStreetData } from './voss-streets.ts';
 import { decorrelateWaterNormals } from './water-reflection.ts';
@@ -1989,7 +1990,11 @@ function contours(data: WorldData, points: LocalPoint[]) {
 }
 
 function addWater(group: Group, data: WorldData, surface: MeshStandardMaterial, polished: boolean,
-  reflection?: WaterReflection, placement?: SceneryPlacement) {
+  reflection?: WaterReflection, placement?: SceneryPlacement, bridgeTerrain?: {
+    group: Group;
+    rail: Rail;
+    nearby: ReturnType<typeof routeIndex>;
+  }) {
   const released: (() => void)[] = [];
   const bodies = data.features.filter(feature => feature.type === 'water');
   if (polished && bodies.length) applyWaterBanks(surface, createShorelineField(data.terrain, bodies));
@@ -2001,9 +2006,31 @@ function addWater(group: Group, data: WorldData, surface: MeshStandardMaterial, 
     const holes = (feature.holes ?? []).map((hole) => contours(data, polygon(hole))).filter((hole) => hole.length >= 3);
     const rings = [...outline, ...holes.flat()];
     const indices = triangles(outline, holes);
+    let correction: RiverTerrainCorrection | undefined;
+    if (bridgeTerrain && feature.tags.water === 'river') {
+      const { group: terrain, rail, nearby } = bridgeTerrain;
+      const areas = data.spans.filter(span => span.bridge && span.end - span.start > 12)
+        .map(span => rail.position((span.start + span.end) / 2))
+        .filter(({ x, z }) => inside([x, -z], outline) && !holes.some(hole => inside([x, -z], hole)))
+        .map(({ x, z }) => ({
+          x, z, sample: sampleVossStreetTerrain(terrain, { center: [x, -z], radiusMetres: 65 },
+            (east, worldZ) => gradedHeight(data, nearby, east, worldZ)),
+        }));
+      if (areas.length) correction = {
+        refine: (east, north) => areas.some(area => Math.hypot(area.x - east, area.z + north) < 54 + data.terrain.spacing),
+        floor: (east, north, baseHeight) => {
+          const area = areas.find(area => Math.hypot(area.x - east, area.z + north) < 52);
+          if (!area) return -Infinity;
+          const strength = 1 - smoothstep((Math.hypot(area.x - east, area.z + north) - 39) / 13);
+          const raised = baseHeight + Math.max(0, area.sample(east, -north) - baseHeight) * strength;
+          const track = nearby(east, -north);
+          return track && track.distance < 3 ? Math.min(raised, track.height - 1.18) : raised;
+        },
+      };
+    }
     const river = polished && feature.tags.water === 'river' ? buildRiverSurface(rings, indices,
       (east, north) => elevationAt(data, east, -north), data.terrain.spacing,
-      [data.terrain.east, data.terrain.north], placement && ((east, north) => placement.ownsCell(east, -north))) : undefined;
+      [data.terrain.east, data.terrain.north], placement && ((east, north) => placement.ownsCell(east, -north)), correction) : undefined;
     const points = river?.points ?? rings;
     if (!points.length) continue;
     const vertices = points.flatMap(([east, north], index) => [east, river?.heights[index] ?? waterLevel, -north]);
@@ -2618,7 +2645,8 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   const applyTrackDetail = addTrack(group, data, rail, ballast, concrete, nearby,
     exposedRock ? { surface: ground, paint, cut } : undefined);
   addParallelTracks(group, data, nearby, ballast, polished);
-  const releaseWater = addWater(group, data, water, polished, maps.waterReflection, placement);
+  const releaseWater = addWater(group, data, water, polished, maps.waterReflection, placement,
+    polished ? { group: terrain, rail, nearby } : undefined);
   addBuildings(group, data, windows, roofs, maps.siding, nearby, polished);
   const streets = maps.vossStreets;
   const vegetation = polished ? createVegetation(data, rail, {

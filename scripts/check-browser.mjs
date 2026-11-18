@@ -38,9 +38,20 @@ try {
     await page.waitForFunction(() => Number(document.getElementById('speed').textContent) >= 15,null,{timeout:120000});
   }
   for (const [index, [view, hero]] of views.entries()) {
-    if (software && index) await launch(hero);
+    let previousFrame;
+    if (software && index) {
+      previousFrame = await page.evaluate(id => {
+        const frame = document.getElementById('world').dataset.captureFrame;
+        window.dispatchEvent(new CustomEvent('station-capture', {detail: {id, look:'golden'}}));
+        return frame;
+      }, hero);
+      assert.ok(previousFrame, 'The first workload capture rendered a frame');
+    }
     if (!software) await page.keyboard.press(String(index + 1));
-    await page.waitForFunction(selected => document.getElementById('world').dataset.view === selected,view,{timeout:120000,polling:250});
+    await page.waitForFunction(({view, previousFrame}) => {
+      const state = document.getElementById('world').dataset;
+      return state.view === view && (!previousFrame || (state.stage === 'running' && state.captureFrame !== previousFrame));
+    }, {view, previousFrame}, {timeout:180000,polling:250});
     const info = await page.locator('#world').evaluate(el => ({
       calls: Number(el.dataset.drawCalls), triangles: Number(el.dataset.triangles)
     }));

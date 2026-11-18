@@ -135,3 +135,9 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - Added rock and soil variation along exposed slopes, roofs built over the mapped building footprints, tunnel backfill with continuous terrain materials, and reflective water colors based on the mapped shoreline and elevation data. Platform surfaces and furnishings follow mapped material and amenity tags.
 - Waiting passengers occupy the mapped deck. They walk to car door sills supplied by the stopped consist and stay on the platform if no open door is reachable.
 - Checked all five Evanger–Voss tiles with polished scenery, using 6,699 trackbed samples and 131,535 coach-envelope probes. The maximum bed gap was 0.316 m, with no missing samples or envelope intersections. Five focused roof and boarding tests passed. Final camera captures and planar shoreline reflections are separate follow-up work.
+
+## Lakeside chase vegetation pass
+
+- On the 8.7 km Evanger–Voss tile, the previous global spacing thinned the active woods to 22 tree roots within 80 m of the track point. Denser sampling of the same OSM woods now places 223 roots within 80 m and 1,688 within 225 m. Maple-free warm autumn tints distinguish scattered birches from pine and spruce. Clustered low plants occupy dry, moderate-slope shoulders while preserving mapped exclusions.
+- In the chase view, tree crowns now stay out of low-angle views through an eye-elevation test. The above-canopy representation remains available for steep overhead views. The targeted tests cover placement ownership, mapped exclusions, species tags, low-angle crown visibility and synchronized shadow motion.
+- Indexed polygon edges by scan rows. The new placement generated the same full tile layout in 0.60 s during the local Node check, down from 6.47 s before indexing. TypeScript, targeted lint and all three vegetation tests passed.

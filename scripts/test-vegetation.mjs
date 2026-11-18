@@ -36,7 +36,7 @@ test('woodland and understory respect mapped no-growth areas and streamed tile o
     const { east, north, width, kind } = plant;
     assert.ok(east > 0);
     assert.ok(!(east >= 4 && east <= 15 && north >= 24 && north <= 80));
-    if (forest.has(kind) && plant.height >= 5.4) assert.equal(kind, 'birch');
+    if (forest.has(kind)) assert.equal(kind, 'birch');
     const minimum = forest.has(kind) ? 4.8 + width * 0.52 : 3.05 + width * 0.55;
     assert.ok(Math.min(east, Math.abs(east - 21)) >= minimum);
   }
@@ -76,6 +76,8 @@ test('woodland detail is exclusive and wind updates matching shadow depth geomet
       near.material.onBeforeCompile(color);
       near.customDepthMaterial.onBeforeCompile(depth);
       assert.equal(color.vertexShader, depth.vertexShader);
+      assert.match(color.vertexShader, /lookFrom.y \/ max\(0.01, length\(lookFrom\)\)/);
+      assert.match(color.vertexShader, /smoothstep\(0.52, 0.77, viewElevation\)/);
       assert.equal(color.uniforms.plantTime, depth.uniforms.plantTime);
       assert.equal(color.uniforms.plantTime.value, 0.2);
       assert.equal(color.uniforms.plantPowder.value, 1);

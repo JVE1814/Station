@@ -49,16 +49,6 @@ function sequence(seed: number) {
   return () => hash(index++, seed, 77);
 }
 
-function contains(x: number, y: number, ring: readonly LocalPoint[]) {
-  let inside = false;
-  for (let current = 0, previous = ring.length - 1; current < ring.length; previous = current++) {
-    const [ax, ay] = ring[current];
-    const [bx, by] = ring[previous];
-    if ((ay > y) !== (by > y) && x < (bx - ax) * (y - ay) / (by - ay) + ax) inside = !inside;
-  }
-  return inside;
-}
-
 type Bounds = { minX: number; maxX: number; minY: number; maxY: number };
 
 function polygonBounds(points: readonly LocalPoint[]): Bounds {
@@ -99,7 +89,41 @@ class SpatialBins<T> {
   }
 }
 
-interface PlantingPolygon { feature: WorldFeature; bounds: Bounds }
+function ringContains(points: readonly LocalPoint[], extent: Bounds) {
+  const stride = 44;
+  const rows = new Map<number, Array<{ x: number; y: number; y2: number; slope: number }>>();
+  for (let current = 0, previous = points.length - 1; current < points.length; previous = current++) {
+    const [x, y] = points[current];
+    const [x2, y2] = points[previous];
+    if (y === y2) continue;
+    const bottom = Math.max(Math.min(y, y2), extent.minY);
+    const top = Math.min(Math.max(y, y2), extent.maxY);
+    if (bottom > top) continue;
+    const edge = { x, y, y2, slope: (x2 - x) / (y2 - y) };
+    for (let index = Math.floor(bottom / stride); index <= Math.floor(top / stride); index++) {
+      let row = rows.get(index);
+      if (!row) {
+        row = [];
+        rows.set(index, row);
+      }
+      row.push(edge);
+    }
+  }
+  return (x: number, y: number) => {
+    let inside = false;
+    for (const edge of rows.get(Math.floor(y / stride)) ?? []) {
+      if ((edge.y > y) !== (edge.y2 > y) && x < edge.x + (y - edge.y) * edge.slope) inside = !inside;
+    }
+    return inside;
+  };
+}
+
+interface PlantingPolygon {
+  feature: WorldFeature;
+  bounds: Bounds;
+  contains: (x: number, y: number) => boolean;
+  holes: ((x: number, y: number) => boolean)[];
+}
 
 function collectPolygons(data: WorldData, extent: Bounds) {
   const woods = new SpatialBins<PlantingPolygon>(240);
@@ -112,11 +136,14 @@ function collectPolygons(data: WorldData, extent: Bounds) {
       minY: Math.max(bounds.minY, extent.minY), maxY: Math.min(bounds.maxY, extent.maxY),
     };
     if (clipped.minX > clipped.maxX || clipped.minY > clipped.maxY) continue;
-    (feature.type === 'forest' ? woods : open).insert({ feature, bounds }, clipped);
+    (feature.type === 'forest' ? woods : open).insert({
+      feature, bounds, contains: ringContains(feature.points, clipped),
+      holes: feature.holes?.map(hole => ringContains(hole, clipped)) ?? [],
+    }, clipped);
   }
   const enclosed = (east: number, north: number, polygon: PlantingPolygon) =>
-    inBounds(east, north, polygon.bounds) && contains(east, north, polygon.feature.points)
-      && !polygon.feature.holes?.some(hole => contains(east, north, hole));
+    inBounds(east, north, polygon.bounds) && polygon.contains(east, north)
+      && !polygon.holes.some(hole => hole(east, north));
   return {
     woodAt: (east: number, north: number) =>
       woods.candidates(east, north).find(polygon => enclosed(east, north, polygon))?.feature,
@@ -163,6 +190,22 @@ function collectSurfaceTrack(data: WorldData) {
   };
 }
 
+function collectRailApproaches(rail: Rail) {
+  const samples = new SpatialBins<LocalPoint>(480);
+  for (let distance = 0; distance <= rail.length + 28; distance += 28) {
+    const { x, z } = rail.position(distance);
+    const padding = 665;
+    samples.insert([x, -z], { minX: x - padding, maxX: x + padding, minY: -z - padding, maxY: -z + padding });
+  }
+  return (x: number, y: number) => {
+    let closest = 665 ** 2;
+    for (const [east, north] of samples.candidates(x, y)) {
+      closest = Math.min(closest, (east - x) ** 2 + (north - y) ** 2);
+    }
+    return Math.sqrt(closest);
+  };
+}
+
 function treeKind(feature: WorldFeature, roll: number): PlantKind {
   const leaf = feature.tags.leaf_type;
   if (leaf === 'broadleaved') return 'birch';
@@ -187,23 +230,32 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
     tint: 0.65 + hash(seed, 15, 23) * 0.35,
   });
 
-  const across = extent.maxX - extent.minX;
-  const length = extent.maxY - extent.minY;
-  const densityStep = Math.max(9.8, Math.ceil(Math.sqrt(across * length / 19500) / 4.9) * 4.9);
-  for (let j = Math.floor(extent.minY / densityStep); j * densityStep <= extent.maxY; j++) {
-    for (let i = Math.floor(extent.minX / densityStep); i * densityStep <= extent.maxX; i++) {
-      const x = (i + hash(i, j, 1)) * densityStep;
-      const y = (j + hash(i, j, 2)) * densityStep;
-      const feature = woodAt(x, y);
-      if (!feature || !accepted(x, y)) continue;
-      const morph = hash(i, j, 3);
-      const gap = Math.sin(x * 0.021 + Math.sin(y * 0.013)) * Math.cos(y * 0.017 - Math.sin(x * 0.008));
-      if (morph < Math.max(0, gap * 0.28)) continue;
-      const kind = treeKind(feature, hash(i, j, 4));
-      const height = (kind === 'spruce' ? 7.5 : kind === 'pine' ? 7 : 5.4) + Math.pow(morph, 1.4) * 12;
-      const width = height * (kind === 'spruce' ? 0.28 : kind === 'pine' ? 0.43 : 0.4);
-      if (distanceToTrack(x, y) < width * 0.52 + 4.8) continue;
-      plants.push(growth(x, y, kind, height, width, Math.floor(hash(i, j, 6) * 2 ** 30)));
+  const approaches = collectRailApproaches(rail);
+  const placeTree = (x: number, y: number, row: number, col: number, variant: number) => {
+    const feature = woodAt(x, y);
+    if (!feature || !accepted(x, y)) return;
+    const morph = hash(col, row, variant + 3);
+    const gap = Math.sin(x * 0.021 + Math.sin(y * 0.013)) * Math.cos(y * 0.017 - Math.sin(x * 0.008));
+    if (morph < Math.max(0, gap * 0.26)) return;
+    const kind = treeKind(feature, hash(col, row, variant + 4));
+    const height = (kind === 'spruce' ? 7.5 : kind === 'pine' ? 7 : 5.4) + Math.pow(morph, 1.4) * 12;
+    const width = height * (kind === 'spruce' ? 0.28 : kind === 'pine' ? 0.43 : 0.4);
+    if (distanceToTrack(x, y) < width * 0.52 + 4.8) return;
+    plants.push(growth(x, y, kind, height, width, Math.floor(hash(col, row, variant + 6) * 2 ** 30)));
+  };
+  const cell = 24;
+  for (let row = Math.floor(extent.minY / cell); row * cell <= extent.maxY; row++) {
+    for (let col = Math.floor(extent.minX / cell); col * cell <= extent.maxX; col++) {
+      const distance = approaches((col + 0.5) * cell, (row + 0.5) * cell);
+      const subdivisions = distance < 295 ? 3 : distance < 640 ? 2 : 1;
+      for (let iy = 0; iy < subdivisions; iy++) {
+        for (let ix = 0; ix < subdivisions; ix++) {
+          const variant = (iy * subdivisions + ix) * 17;
+          const x = (col + (ix + 0.13 + hash(col, row, variant + 1) * 0.74) / subdivisions) * cell;
+          const y = (row + (iy + 0.13 + hash(col, row, variant + 2) * 0.74) / subdivisions) * cell;
+          placeTree(x, y, row, col, variant);
+        }
+      }
     }
   }
 
@@ -237,13 +289,37 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
         if (distanceToTrack(x, y) < (kind === 'willow' ? 5.8 : 3.05) + width * 0.55) continue;
         plants.push(growth(x, y, kind, height, width, seed + strip * 24 + side));
       }
+      const patch = Math.floor(d / 10.8);
+      if (Math.floor((d - 2.7) / 10.8) !== patch && hash(patch, side, 84) > 0.27) {
+        const offset = 11 + 22 * hash(patch, side, 85);
+        const count = 3 + Math.floor(7 * hash(patch, side, 87));
+        for (let stem = 0; stem < count; stem++) {
+          const jitter = (hash(patch, stem * side, 92) - 0.5) * 10;
+          const alongShift = (hash(patch, stem * side, 93) - 0.5) * 18;
+          const x = along.x + side * shoulder.x * (offset + jitter) + shoulder.z * alongShift;
+          const y = -along.z - side * shoulder.z * (offset + jitter) + shoulder.x * alongShift;
+          if (!accepted(x, y)) continue;
+          const slope = Math.hypot(
+            groundHeight(terrain, x + 2, y) - groundHeight(terrain, x - 2, y),
+            groundHeight(terrain, x, y + 2) - groundHeight(terrain, x, y - 2),
+          ) / 4;
+          if (slope > 0.70) continue;
+          const mix = hash(patch, stem + side * 61, 97);
+          const kind = mix < 0.68 ? 'willow' : mix < 0.87 ? 'fern' : 'fireweed';
+          const height = kind === 'willow' ? 1.15 + 1.42 * mix : 0.52 + 0.53 * mix;
+          const width = height * (kind === 'willow' ? 1.62 : 1.26);
+          if (distanceToTrack(x, y) < (kind === 'willow' ? 5.8 : 3.05) + width * 0.55) continue;
+          plants.push(growth(x, y, kind, height, width, patch * 37 + side * stem));
+        }
+      }
       // Draw juvenile trees along the edges of the mapped forest cover.
       if (hash(seed, side, 121) > 0.88) {
         const offset = 15 + 9 * hash(seed, side, 188);
         const x = along.x + side * shoulder.x * offset;
         const y = -along.z - side * shoulder.z * offset;
-        if (woodAt(x, y) && accepted(x, y) && distanceToTrack(x, y) >= 10) {
-          const kind = hash(seed, side, 48) < 0.51 ? 'birch' : 'spruce';
+        const canopy = woodAt(x, y);
+        if (canopy && accepted(x, y) && distanceToTrack(x, y) >= 10) {
+          const kind = treeKind(canopy, hash(seed, side, 48));
           const height = 1.6 + 3.25 * hash(seed, side, 81);
           plants.push(growth(x, y, kind, height, height * 0.43, seed * side));
         }
@@ -524,7 +600,7 @@ function cardGeometry(layout: 'detailed' | 'distant' | 'understory') {
     }
     indices.push(index, index + 1, index + 2, index, index + 2, index + 3);
   };
-  const sides = layout === 'detailed' ? 4 : layout === 'distant' ? 2 : 3;
+  const sides = layout === 'detailed' ? 3 : layout === 'distant' ? 2 : 3;
   for (let side = 0; side < sides; side++) {
     const angle = side * Math.PI / sides;
     const x = Math.cos(angle) / 2;
@@ -532,8 +608,8 @@ function cardGeometry(layout: 'detailed' | 'distant' | 'understory') {
     add([-x, 0, -z, x, 0, z, x, 1, z, -x, 1, -z], new Vector3(-z, 0.36, x).normalize());
   }
   if (layout !== 'understory') {
-    add([-0.48, 0.68, -0.49, 0.48, 0.75, -0.49, 0.48, 0.83, 0.49, -0.48, 0.76, 0.49],
-      new Vector3(0, 1, 0), 1);
+    add([-0.47, 0.59, -0.48, 0.46, 0.72, -0.48, 0.46, 0.89, 0.48, -0.47, 0.70, 0.48],
+      new Vector3(-0.12, 0.98, -0.14).normalize(), 1);
   }
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
@@ -579,8 +655,9 @@ vec4 root = vec4(0.0, 0.0, 0.0, 1.0);
 #ifdef USE_INSTANCING
 root = instanceMatrix * root;
 #endif
-float rootHeight = (modelMatrix * root).y;
-vPlantOpacity = mix(1.0, smoothstep(15.0, 70.0, cameraPosition.y - rootHeight), plantCrown);
+vec3 lookFrom = cameraPosition - (modelMatrix * root).xyz;
+float viewElevation = lookFrom.y / max(0.01, length(lookFrom));
+vPlantOpacity = mix(1.0, smoothstep(0.52, 0.77, viewElevation), plantCrown);
 vPlantTip = position.y;`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying float vPlantOpacity;')
@@ -628,7 +705,12 @@ function buildBatch(plants: Plant[], base: BufferGeometry, detailedBase: BufferG
     dummy.scale.set(plant.width, plant.height, plant.width);
     dummy.updateMatrix();
     simpler.setMatrixAt(index, dummy.matrix);
-    color.setRGB(plant.tint, 0.80 + plant.tint * 0.20, 0.83 + plant.tint * 0.17);
+    const autumn = plant.kind === 'birch'
+      ? Math.max(0, Math.sin(plant.east * 0.012 + Math.sin(plant.north * 0.017)) * 0.54 + plant.tint * 0.44)
+      : 0;
+    color.setRGB(plant.tint * (1 + autumn * 0.29),
+      0.80 + plant.tint * 0.20 - autumn * 0.12,
+      0.83 + plant.tint * 0.17 - autumn * 0.43);
     simpler.setColorAt(index, color);
   });
   simpler.name = cover ? 'Railway understory' : 'Mapped woodland canopy';

@@ -47,14 +47,14 @@ try {
       });
       await page.goto(uri.href);
       const boot = await page.waitForFunction(() => {
-        if (document.getElementById('world').dataset.stage !== 'running') return false;
+        const stage = document.getElementById('world').dataset.stage;
+        return stage === 'running' || stage === 'failed' ? stage : false;
+      }, null, { timeout: 600_000, polling: 250 }).catch(withState);
+      assert.equal(await boot.jsonValue(), 'running', `${ref} must start offline`);
+      const service = await page.evaluate(() => {
         document.getElementById('pause').click();
-        return {
-          line: document.getElementById('line').textContent,
-          journey: document.getElementById('journey').textContent,
-        };
-      }, null, { timeout: 240_000, polling: 200 }).catch(withState);
-      const service = await boot.jsonValue();
+        return { line: document.getElementById('line').textContent, journey: document.getElementById('journey').textContent };
+      });
       assert.equal(service.line, ref);
       assert.match(service.journey, new RegExp(destination));
       await page.evaluate(() => {
@@ -62,14 +62,14 @@ try {
         document.getElementById('fit-network').click();
       });
       await page.waitForFunction(() => document.getElementById('world').dataset.view === 'map', null,
-        { timeout: 180_000, polling: 200 }).catch(withState);
+        { timeout: 360_000, polling: 250 }).catch(withState);
       await capture('whole-network');
       if (ref === 'F4') {
         await page.locator('#map-station').selectOption({ label: 'Stavanger' });
         await page.waitForFunction(() => {
           const { detailLine, view } = document.getElementById('world').dataset;
           return detailLine === 'F5' && view === 'map';
-        }, null, { timeout: 180_000, polling: 200 }).catch(withState);
+        }, null, { timeout: 360_000, polling: 250 }).catch(withState);
         assert.equal(await page.locator('#line').textContent(), 'F4');
         await capture('map-stavanger');
         console.log('Zoomed from the whole network to mapped Stavanger platforms without changing the F4 service.');

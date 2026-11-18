@@ -8,6 +8,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from bake_network_tiles import bake_network, write_json
+from bake_voss_streets import bake_voss_streets
 from extract_network_timetable import station_associations
 from extract_osm import extract
 from extract_timetable import rows
@@ -150,6 +151,8 @@ def main():
     bake_network(route, snapshot, args.output, args.work, tile_length=3600, padding=1850, spacing=spacing,
                  compress=True, elevation=elevation, clip_scenery=True)
     write_json(args.output / "timetables.json", [dated])
+    bake_voss_streets(args.output / "network.json", args.output / "voss-streets.json",
+                     snapshot=snapshot, work=args.work)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,8 @@ import type { GabledRoof } from './roof.ts';
 import { blendExposedRock, civilTexture } from './scenery-materials.ts';
 import { applyWaterBanks, createShorelineField } from './lake-surface.ts';
 import { buildRiverSurface } from './river-surface.ts';
+import { createVossStreets, sampleVossStreetTerrain } from './voss-streets.ts';
+import type { VossStreetData } from './voss-streets.ts';
 import { decorrelateWaterNormals } from './water-reflection.ts';
 import type { WaterReflection } from './water-reflection.ts';
 import { createVegetation } from './vegetation.ts';
@@ -2463,6 +2465,7 @@ export interface SceneryMaps {
   spruce?: Texture;
   pineAndBirch?: Texture;
   terrainDetail?: Texture;
+  vossStreets?: VossStreetData;
   waterReflection?: WaterReflection;
   siding?: Texture;
   roofing?: Texture;
@@ -2560,6 +2563,15 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   const setSignal = addSignals(group, data, nearby);
   const { bulbs, platforms, setPlatformWeather } = addPlatforms(group, data, rail, concrete, fixtures, nearby, polished, maps.siding);
   if (polished) addWaitingShelters(group, data, platforms, maps.siding);
+  const streets = maps.vossStreets;
+  if (polished && streets && data.stations.some(station => station.osmId === streets.stationOsmId)) {
+    group.add(createVossStreets(streets, {
+      heightAt: sampleVossStreetTerrain(terrain, streets, (east, z) => gradedHeight(data, nearby, east, z)),
+      railPaths: [data.rail.map(({east, north}) => [east, north]),
+        ...data.features.filter(feature => feature.type === 'track').map(feature => feature.points)],
+      platformOutlines: platforms.map(platform => platform.outline),
+    }));
+  }
   const passengers = polished ? createPassengers(data.stations, platforms, rail, placement?.ownsCell) : undefined;
   if (passengers) group.add(passengers.group);
   group.traverse(object => {

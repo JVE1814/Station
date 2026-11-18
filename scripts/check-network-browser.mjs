@@ -26,11 +26,16 @@ try {
       };
       const errors = [];
       const foreignRequests = [];
-      page.on('pageerror', error => errors.push(error.message));
+      page.on('pageerror', error => { errors.push(error.message); console.error(ref, error.message); });
       page.on('console', message => {
         if (message.type() === 'error') errors.push(message.text());
       });
       const uri = new URL(server.resolvedUrls.local[0]);
+      const withState = async error => {
+        const state = await page.locator('#world').evaluate(world => ({...world.dataset})).catch(() => ({}));
+        console.error(`${ref} offline browser state`, state, errors);
+        throw error;
+      };
       uri.searchParams.set('line', ref);
       await page.route('**/*', route => {
         const request = new URL(route.request().url());
@@ -48,7 +53,7 @@ try {
           line: document.getElementById('line').textContent,
           journey: document.getElementById('journey').textContent,
         };
-      }, null, { timeout: 240_000, polling: 200 });
+      }, null, { timeout: 240_000, polling: 200 }).catch(withState);
       const service = await boot.jsonValue();
       assert.equal(service.line, ref);
       assert.match(service.journey, new RegExp(destination));
@@ -57,14 +62,14 @@ try {
         document.getElementById('fit-network').click();
       });
       await page.waitForFunction(() => document.getElementById('world').dataset.view === 'map', null,
-        { timeout: 180_000, polling: 200 });
+        { timeout: 180_000, polling: 200 }).catch(withState);
       await capture('whole-network');
       if (ref === 'F4') {
         await page.locator('#map-station').selectOption({ label: 'Stavanger' });
         await page.waitForFunction(() => {
           const { detailLine, view } = document.getElementById('world').dataset;
           return detailLine === 'F5' && view === 'map';
-        }, null, { timeout: 180_000, polling: 200 });
+        }, null, { timeout: 180_000, polling: 200 }).catch(withState);
         assert.equal(await page.locator('#line').textContent(), 'F4');
         await capture('map-stavanger');
         console.log('Zoomed from the whole network to mapped Stavanger platforms without changing the F4 service.');

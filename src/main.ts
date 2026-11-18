@@ -25,6 +25,7 @@ import { ShowpiecePanel, StoppingMarker } from './showpiece-ui';
 import { DrivingTutorial, STOPPED_SPEED } from './driving';
 import { createLakesideProfile, StationAudio } from './audio';
 import { WaterReflection } from './water-reflection';
+import type { VossStreetData } from './voss-streets';
 import './style.css';
 
 function element<T extends HTMLElement = HTMLElement>(id: string): T {
@@ -82,11 +83,11 @@ async function run(): Promise<void> {
   const [grass, ballast, spruce, siding, roofing, dashboard, steel] = await Promise.all([
     'grass', 'ballast', 'spruce', 'siding', 'roofing', 'dashboard', 'steel',
   ].map(loadMap));
-  const [pineAndBirch, terrainDetail] = showpiece ? await Promise.all([
-    loadMap('norway-trees'), loadMap('r40-ground'),
+  const [pineAndBirch, terrainDetail, vossStreets] = showpiece ? await Promise.all([
+    loadMap('norway-trees'), loadMap('r40-ground'), readWorldAsset<VossStreetData>('data/r40/voss-streets.json'),
   ]) : [];
   const waterReflection = showpiece ? new WaterReflection() : undefined;
-  const maps = { grass, ballast, spruce, siding, roofing, pineAndBirch, terrainDetail, waterReflection, polished: showpiece };
+  const maps = { grass, ballast, spruce, siding, roofing, pineAndBirch, terrainDetail, vossStreets, waterReflection, polished: showpiece };
   let dirty = true;
   const sceneryChanged = () => { dirty = true; };
   const sceneryError = (error: unknown) => {
@@ -625,7 +626,7 @@ async function run(): Promise<void> {
     const transition = portal ? Math.min(1, (Math.min(chaseDistance - portal.start, portal.end - chaseDistance) + 18) / 18) : 0;
     const weight = transition * transition * (3 - 2 * transition);
     cameras.motion(state.speed, chainage, state.acceleration, paused ? 0 : elapsed);
-    cameras.update(cab.group, cab.eye, elapsed, heightAt, tunnel && { ...tunnel, weight });
+    cameras.update(cab.group, cab.eye, wallTime, heightAt, tunnel && { ...tunnel, weight });
     if (overview) {
       const height = Math.max(0, cameras.camera.position.y - cab.group.position.y);
       const shown = cameras.view === 'map' && height > 1800;

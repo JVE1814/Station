@@ -1,6 +1,7 @@
 import { CanvasTexture, Group, Sprite, SpriteMaterial, SRGBColorSpace } from 'three';
 import type { Weather } from './atmosphere';
-import { DrivingTutorial, surfaceNames } from './driving';
+import { PLATFORM_TOLERANCE, surfaceNames } from './driving.ts';
+import type { DrivingTutorial } from './driving.ts';
 import type { Rail } from './rail';
 import type { Service } from './service';
 import type { Station } from './world-data';
@@ -28,12 +29,13 @@ export class ShowpiecePanel {
     number('preview-signal').dataset.aspect = signal?.aspect ?? '';
     number('preview-limit').textContent = speedChange ? `${speedChange.limit} km/h in ${distance(speedChange.distance)}` : 'No speed change ahead';
     const guide = number('brake-cue');
+    const inStopZone = service.nextStop && Math.abs(service.nextStop.stopDistance - service.chainage()) <= PLATFORM_TOLERANCE;
     guide.textContent = service.boardingRemaining > 0 ? `Boarding · ${Math.ceil(service.boardingRemaining)} s`
+      : service.controls.doorsOpen ? `${service.nextStop ? 'Boarding complete' : 'Service complete'} · D to close doors`
       : !service.nextStop ? 'Service complete · R to retry'
-      : service.controls.doorsOpen && service.nextStop ? 'Boarding complete · D to close doors'
-        : service.canOpenDoors && !tutorial && guidance.target === 'station' && guidance.recommendedSpeed === 0 ? 'At the marker · D to open doors'
-          : guidance.brakeNotch ? `Brake ${guidance.brakeNotch} · Aim for ${Math.round(guidance.recommendedSpeed)} km/h`
-            : `${guidance.powerNotch ? `Power ${guidance.powerNotch}` : 'Coast'} · Aim for ${Math.round(guidance.recommendedSpeed)} km/h`;
+      : service.canOpenDoors && !tutorial && inStopZone ? 'Within stop zone · D to open doors'
+      : guidance.brakeNotch ? `Brake ${guidance.brakeNotch} · Aim for ${Math.round(guidance.recommendedSpeed)} km/h`
+      : `${guidance.powerNotch ? `Power ${guidance.powerNotch}` : 'Coast'} · Aim for ${Math.round(guidance.recommendedSpeed)} km/h`;
     guide.dataset.brake = String(guidance.brakeNotch > 0 && service.state.speed > 1);
     number('grip').textContent = `${surfaceNames[weather]} · ${service.passengersAboard} aboard`;
     if (tutorial) {

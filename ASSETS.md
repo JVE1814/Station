@@ -4,7 +4,7 @@ The data cache holds original downloads. Baked application data will retain attr
 
 | Source | Use | License and attribution |
 | --- | --- | --- |
-| [OpenStreetMap extract from Geofabrik](https://download.geofabrik.de/europe/norway.html) | Railway and surrounding geographic features | © OpenStreetMap contributors, [ODbL](https://www.openstreetmap.org/copyright) |
+| [OpenStreetMap extract from Geofabrik](https://download.geofabrik.de/europe/norway.html) | Railway and surrounding geographic features, including Voss street and access centreline geometry within 500 m of the station | © OpenStreetMap contributors, [ODbL](https://www.openstreetmap.org/copyright) |
 | [Copernicus DEM GLO-30](https://registry.opendata.aws/copernicus-dem/) | Terrain surface elevations | Copernicus DEM public license. Produced using Copernicus WorldDEM-30 © DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018, provided under COPERNICUS by the European Union and ESA. |
 | [Kartverket DTM1](https://kartkatalog.geonorge.no/metadata/hoeyde-dtm1/0442c622-6639-4024-86be-846de8c15bb2) | Evanger–Voss bare-earth terrain, resampled from 1 m to 8 m streamed runtime grids | © Kartverket, [NLOD 2.0](https://data.norge.no/nlod/en/2.0). Source tile revisions and links are pinned in [data/r40-kartverket-source.json](data/r40-kartverket-source.json). |
 | GPT Image | Original visual reference contact sheet | Generated for this project, see [reference](reference/) |

@@ -1,0 +1,11 @@
+F4: 48 names and source coordinates checked against OSM; 0 unlisted passenger/mixed landmarks within 350 m
+F5: 54 names and source coordinates checked against OSM; 1 unlisted passenger/mixed landmarks within 350 m
+F6: 34 names and source coordinates checked against OSM; 6 unlisted passenger/mixed landmarks within 350 m
+F5 Trykkerud n5526332045: 285.6 m from selected w294691664 Sørlandsbanen; calls [364507330]; participating tracks w303161468 Tinnosbanen; other alignment
+F6 Lindeberg n450204466: 16.6 m from selected w1572167770 Gardermobanen; calls [2409184817, 3111444163]; participating tracks w232574362 Hovedbanen, w232574365 Hovedbanen, w639097695 Hovedbanen; other alignment
+F6 Leirsund n721744992: 13.9 m from selected w232574342 Gardermobanen; calls [2409183974]; participating tracks w941776819 Hovedbanen; other alignment
+F6 Bryn n2011317766: 16.6 m from selected w638594593 Romeriksporten; calls [5709579440, 12202706518]; participating tracks w94589128 Hovedbanen, w94589168 Hovedbanen; other alignment
+F6 Hanaborg n2012791848: 181.7 m from selected w554930427 Romeriksporten; calls [25681258, 690232909]; participating tracks w612793693 Hovedbanen, w1124222919 Hovedbanen; other alignment
+F6 Kløfta n2409183972: 22.2 m from selected w1103170113 Gardermobanen; calls [739542122, 2409183973]; participating tracks w232574345 Hovedbanen, w232574346 Hovedbanen; other alignment
+F6 Strømmen n5526331866: 44.2 m from selected w554930427 Romeriksporten; calls [767001291, 2012791863]; participating tracks w61437977 Hovedbanen, w612793691 Hovedbanen; other alignment
+Omitted named passenger/mixed station landmarks with unresolved alignment: 0

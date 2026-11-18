@@ -34,7 +34,7 @@ function segmentDistance(east, north, from, to) {
 
 async function verifyGeography(route) {
   const transform = proj4('EPSG:4326', route.projection);
-  const { sourcePath, ways } = await read(route.sourcePathUrl);
+  const { sourcePath, ways, relationStops } = await read(route.sourcePathUrl);
   assert.ok(sourcePath.length > 100, `Missing original source path for ${route.ref}`);
   const vertices = sourcePath.map(entry => transform.forward(entry.point));
   const wayNodeIndices = new Map();
@@ -70,6 +70,9 @@ async function verifyGeography(route) {
   assert.ok(maxTrackError <= 5, `${route.ref} maximum track error ${maxTrackError} m`);
   assert.ok(maxStationError <= 25, `${route.ref} maximum station error ${maxStationError} m`);
   assert.ok(new Set(route.stations.map(station => station.osmId)).size === route.stations.length);
+  assert.ok(relationStops.length > 2, `${route.ref} has no OSM relation call inventory`);
+  assert.deepEqual(new Set(route.stations.filter(station => station.serviceStop).map(station => station.stopOsmId)),
+    new Set(relationStops), `${route.ref} OSM relation calls differ from the baked station inventory`);
 
   let end = 0;
   let lastPoint = null;

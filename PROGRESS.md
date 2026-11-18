@@ -40,3 +40,8 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - Maximum rail deviation was 0.125 m across the three alignments. The 136 station markers matched their source names and positions, and the global rail joined exactly at each of the 169 tile interfaces.
 - The updated brake envelope limits measured longitudinal jerk during the final approach to rest. Velocity-derived peak jerk was 0.550 m/s³ on each replay. The worst stopping error was 1.96 m.
 - Fixed bridge approach grades and DSM terrain protrusions beneath a mapped bridge. Targeted rechecks passed for the affected F4 tiles and for R40. The full mesh audit continues.
+
+## Passenger station source audit
+
+- Added the OSM relation call inventories to the baked source bundles and verified their exact stop IDs against the 136 station entries. The three full timetable replays passed again after adding the comparison.
+- Independently read the 136 names and coordinates from the pinned OSM extract. Inspected all omitted passenger or mixed-use landmarks within 350 m and traced seven to separate tracks. The commands, source digests and output are in `evidence/`.

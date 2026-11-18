@@ -433,6 +433,7 @@ def bake_service(prepared, all_ways, local_inputs, output, work, spacing, compre
     write_json(output / path_name, {
         "sourcePath": source,
         "ways": {str(way): all_ways[str(way)] for way in sorted(active_ways)},
+        "relationStops": service["serviceStopIds"],
     }, compress=compress)
 
     for tile, grid in zip(tiles, grids, strict=True):

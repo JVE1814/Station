@@ -260,3 +260,8 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 
 - The reviewer repeated practice and drove the release build with the keyboard at 960×600. They served Seimsgrend and Bulken, verified the doors reject moving and short-position attempts, and dismissed both cards with Escape. All three screenshots from this pass decoded at 960×600.
 - A HUD stall at 5× and a brake-input error led to a missed Voss stop on this pass. The HUD showed the distance past the marker and retry cue. The reviewer used R and verified the service returned to its Evanger departure with a cleared result. The two completed manual drives and this final run are recorded together. [Keyboard notes and cards](reference/r40/keyboard/README.md)
+
+## Release verification
+
+- `npm run verify` exited 0 on release source `f261742` with the final gallery. The run passed clean install, TypeScript, lint, 75 JavaScript tests, three Python tests, the production build, all geography and timetable checks, the clearance audits, the R40 weather replays and the gallery checks. F4, F5 and F6 loaded offline with zero console errors. [Verification transcript](reference/r40/verification.txt)
+- At 1080p High on SwiftShader, Cab recorded 525 draw calls and 3,025,590 triangles. Chase recorded 719 draw calls and 4,120,789 triangles. Bird’s-eye recorded 412 draw calls and 2,518,629 triangles. The host had no hardware GPU for p95 frame timing.

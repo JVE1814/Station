@@ -103,6 +103,19 @@ test('woodland detail is exclusive and wind updates matching shadow depth geomet
   try {
     const vegetation = createVegetation(data, new Rail(data.rail));
     try {
+      const brush = vegetation.group.getObjectByName('Railway understory').geometry;
+      const points = brush.getAttribute('position');
+      assert.equal(brush.index.count / 3, 12);
+      for (let index = 0; index < points.count; index++) {
+        const radius = Math.hypot(points.getX(index), points.getZ(index));
+        assert.ok(radius + points.getY(index) ** 2 * 0.085 <= 0.5);
+      }
+      for (let stem = 0; stem < 3; stem++) {
+        const base = stem * 6;
+        assert.ok(points.getY(base + 2) > points.getY(base + 4));
+        assert.ok(Math.hypot(points.getX(base + 4) - points.getX(base),
+          points.getZ(base + 4) - points.getZ(base)) > 0.25);
+      }
       const near = vegetation.group.getObjectByName('Woodland crown detail');
       const far = vegetation.group.getObjectByName('Mapped woodland canopy');
       const camera = near.boundingSphere.center.clone();

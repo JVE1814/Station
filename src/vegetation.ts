@@ -643,7 +643,7 @@ function buildAtlas(options: VegetationOptions) {
   return texture;
 }
 
-function cardGeometry(layout: 'detailed' | 'distant' | 'understory') {
+function cardGeometry(layout: 'detailed' | 'distant') {
   const positions: number[] = [];
   const normals: number[] = [];
   const uvs: number[] = [];
@@ -659,23 +659,61 @@ function cardGeometry(layout: 'detailed' | 'distant' | 'understory') {
     }
     indices.push(index, index + 1, index + 2, index, index + 2, index + 3);
   };
-  const sides = layout === 'detailed' ? 3 : layout === 'distant' ? 2 : 3;
+  const sides = layout === 'detailed' ? 3 : 2;
   for (let side = 0; side < sides; side++) {
     const angle = side * Math.PI / sides;
     const x = Math.cos(angle) / 2;
     const z = Math.sin(angle) / 2;
     add([-x, 0, -z, x, 0, z, x, 1, z, -x, 1, -z], new Vector3(-z, 0.36, x).normalize());
   }
-  if (layout !== 'understory') {
-    add([-0.47, 0.59, -0.48, 0.46, 0.72, -0.48, 0.46, 0.89, 0.48, -0.47, 0.70, 0.48],
-      new Vector3(-0.12, 0.98, -0.14).normalize(), 1);
-  }
+  add([-0.47, 0.59, -0.48, 0.46, 0.72, -0.48, 0.46, 0.89, 0.48, -0.47, 0.70, 0.48],
+    new Vector3(-0.12, 0.98, -0.14).normalize(), 1);
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
   geometry.setAttribute('normal', new Float32BufferAttribute(normals, 3));
   geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2));
   geometry.setAttribute('plantCrown', new Float32BufferAttribute(crowns, 1));
   geometry.setIndex(indices);
+  return geometry;
+}
+
+function understoryGeometry() {
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  // Three staggered stems spread their foliage outward and droop at the tips.
+  const stems = [
+    { heading: 0.28, rootX: -0.10, rootZ: -0.12, height: 1, reach: 0.44, width: 0.66 },
+    { heading: 2.03, rootX: 0.12, rootZ: -0.07, height: 0.83, reach: 0.50, width: 0.76 },
+    { heading: 4.55, rootX: -0.03, rootZ: 0.14, height: 0.69, reach: 0.45, width: 0.57 },
+  ];
+  const sweep = [
+    { lift: 0, bend: 0, spread: 0.28, v: 0 },
+    { lift: 0.93, bend: 0.43, spread: 1, v: 0.57 },
+    { lift: 0.78, bend: 1, spread: 0.72, v: 1 },
+  ];
+  for (const { heading, rootX, rootZ, height, reach, width } of stems) {
+    const x = Math.cos(heading);
+    const z = Math.sin(heading);
+    const first = positions.length / 3;
+    for (const { lift, bend, spread, v } of sweep) {
+      const centerX = rootX + x * reach * bend;
+      const centerZ = rootZ + z * reach * bend;
+      for (const side of [-1, 1]) {
+        const edge = side * width * spread / 2;
+        positions.push((centerX - z * edge) * 0.86, height * lift, (centerZ + x * edge) * 0.86);
+        uvs.push(side < 0 ? 0 : 1, v);
+      }
+    }
+    indices.push(first, first + 1, first + 2, first + 1, first + 3, first + 2,
+      first + 2, first + 3, first + 4, first + 3, first + 5, first + 4);
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute('plantCrown', new Float32BufferAttribute(new Float32Array(positions.length / 3), 1));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
   return geometry;
 }
 
@@ -851,7 +889,7 @@ export function createVegetation(data: WorldData, rail: Rail, options: Vegetatio
   const resources = vegetationMaterials(options);
   const distant = cardGeometry('distant');
   const detailed = cardGeometry('detailed');
-  const understory = cardGeometry('understory');
+  const understory = understoryGeometry();
   const batches = [...buckets.values()].map(bucket => {
     const batch = buildBatch(bucket.plants, bucket.cover ? understory : distant, bucket.cover ? null : detailed,
       resources.material, resources.depth, heightAt, bucket.cover);

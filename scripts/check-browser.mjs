@@ -55,7 +55,7 @@ try {
     const activate = async (id) => page.evaluate(target => document.getElementById(target).click(), id);
     const setView = async (selector, view) => {
       if (await page.locator('#world').getAttribute('data-view') !== view) await activate(selector);
-      await page.waitForFunction(name => document.querySelector('#world').dataset.view === name, view, { timeout: 60_000, polling: 150 });
+      await page.waitForFunction(name => document.querySelector('#world').dataset.view === name, view, { timeout: 120_000, polling: 150 });
     };
     const views = [['cab-view', 'cab'], ['chase-view', 'chase'], ['map-view', 'map']];
     const stats = [];
@@ -64,6 +64,32 @@ try {
       const renderer = await page.locator('#world').getAttribute('data-renderer');
       const software = /swiftshader|llvmpipe|software|softpipe/i.test(renderer);
       target = software ? 8 : 16.7;
+      const traceSession = software ? await page.context().newCDPSession(page) : undefined;
+      const cpuFrameTimes = async () => {
+        const marks = [];
+        const collect = ({ value }) => {
+          for (const event of value) {
+            if (event.name === 'station-frame-start' || event.name === 'station-frame-end') marks.push(event);
+          }
+        };
+        traceSession.on('Tracing.dataCollected', collect);
+        const complete = new Promise(resolve => traceSession.once('Tracing.tracingComplete', resolve));
+        await traceSession.send('Tracing.end');
+        await complete;
+        traceSession.off('Tracing.dataCollected', collect);
+        const costs = [];
+        let start;
+        for (const mark of marks) {
+          if (mark.name === 'station-frame-start') start = mark;
+          else if (start && mark.tid === start.tid && Number.isFinite(start.tts) && Number.isFinite(mark.tts)) {
+            costs.push((mark.tts - start.tts) / 1000);
+            start = undefined;
+          }
+        }
+        assert.ok(costs.length >= 69, 'Chromium did not report enough per-frame main-thread CPU timestamps');
+        return costs.slice(0, 69);
+      };
+      const p95 = values => [...values].sort((a, b) => a - b)[Math.ceil(values.length * 0.95) - 1];
       console.log(`1080p WebGL2 renderer: ${renderer}`);
       await activate('compression');
       await activate('compression');
@@ -72,15 +98,18 @@ try {
       await page.waitForFunction(() => Number(document.querySelector('#speed')?.textContent) >= 5, null, { timeout: 120_000, polling: 150 });
       for (const [selector, view] of views) {
         await setView(selector, view);
+        if (traceSession) await traceSession.send('Tracing.start', {
+          categories: 'blink.user_timing', transferMode: 'ReportEvents',
+        });
         await page.evaluate(() => { window.frameCosts.length = 0; });
-        await page.waitForFunction(() => window.frameCosts.length >= 70, null, { timeout: 300_000, polling: 150 });
-        const costs = await page.evaluate(useCpu => window.frameCosts
-          .slice(1, 70)
-          .map((frame, index) => useCpu ? frame.cpu : frame.time - window.frameCosts[index].time), software);
-        costs.sort((a, b) => a - b);
-        const result = costs[Math.ceil(costs.length * 0.95) - 1];
+        await page.waitForFunction(() => window.frameCosts.length >= 70, null,
+          { timeout: software ? 600_000 : 120_000, polling: 150 });
+        const sample = await page.evaluate(() => window.frameCosts.slice(0, 70));
+        const intervals = sample.slice(1).map((frame, index) => frame.time - sample[index].time);
+        const result = p95(traceSession ? await cpuFrameTimes() : intervals);
         stats.push([view, result]);
-        console.log(`${view} p95: ${result.toFixed(2)} ms (${software ? 'main-thread CPU proxy' : 'frame interval'})`);
+        console.log(`${view} p95: ${result.toFixed(2)} ms (${software ? 'renderer main-thread CPU proxy' : 'frame interval'})`);
+        if (software) console.log(`  Software timing: ${p95(intervals).toFixed(2)} ms wall frame interval, ${p95(sample.map(frame => frame.cpu)).toFixed(2)} ms wall callback.`);
         const loads = await page.locator('#world').evaluate(world => ({
           draws: world.dataset.drawCalls, triangles: world.dataset.triangles,
         }));

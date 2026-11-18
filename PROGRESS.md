@@ -51,3 +51,9 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - Added a line-speed warning and scoring penalty for sustained overspeed. A focused test drives two identical approaches under different limits and confirms the penalty changes the score.
 - Lowered the default chase camera and constrained its orbit inside mapped tunnel bores. Camera tests exercise the tunnel envelope, follow motion and view transitions.
 - Added headlight scattering in the beam and frame draw counts in timing output. TypeScript, lint, the focused tests and the production build passed. Frame timings and the complete accelerated browser drive are still running.
+
+## Network-to-platform camera
+
+- Added a station selector to the intercity bird’s-eye view. It anchors the camera at the mapped station, loads scenery from the selected corridor and leaves the train’s service unchanged. The camera anchor test and all 19 unit tests passed with typecheck, lint and the production build.
+- The offline browser smoke test now verifies a jump from the whole-network view to Stavanger platforms during an F4 service. The queued browser run will exercise the production build.
+- The software rendering benchmark now reads Chromium’s main-thread CPU clock and separately reports wall time. Confirmed Chromium exposes thread timestamps on User Timing marks. The 8 ms proxy limit and the 16.7 ms hardware frame interval limit are unchanged.

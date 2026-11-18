@@ -6,6 +6,7 @@ import type { Weather } from './atmosphere';
 import { Cameras } from './cameras';
 import type { View } from './cameras';
 import { loadNetworkRoute, readWorldAsset } from './network';
+import type { NetworkRoute } from './network';
 import { NetworkOverview } from './network-overview';
 import type { OverviewRoute } from './network-overview';
 import routeCatalog from '../data/route-catalog.json';
@@ -16,7 +17,7 @@ import { Service } from './service';
 import { SceneryStream } from './streaming';
 import { Traffic } from './traffic';
 import { groundHeight, timetableSeconds } from './world-data';
-import type { WorldData } from './world-data';
+import type { Station, WorldData } from './world-data';
 import './style.css';
 
 function element<T extends HTMLElement = HTMLElement>(id: string): T {
@@ -66,12 +67,20 @@ async function run(): Promise<void> {
     'grass', 'ballast', 'spruce', 'siding', 'roofing', 'dashboard', 'steel',
   ].map(loadMap));
   const maps = { grass, ballast, spruce, siding, roofing };
-  const scenery = pair ? createScenery(pair, rail, maps) : new SceneryStream(network!.tiles, maps, rail, data.spans, error => {
+  let dirty = true;
+  const sceneryChanged = () => { dirty = true; };
+  const sceneryError = (error: unknown) => {
     element('notice').textContent = 'A scenery tile could not be loaded.';
     console.error(error);
-  });
-  if (scenery instanceof SceneryStream) await scenery.ready(data.stations[0].stopDistance);
-  const heightAt = scenery instanceof SceneryStream ? (x: number, z: number) => scenery.heightAt(x, z)
+  };
+  const activeStream = network
+    ? new SceneryStream(network.tiles, maps, rail, data.spans, sceneryError, sceneryChanged) : undefined;
+  const scenery = activeStream ?? createScenery(pair!, rail, maps);
+  if (activeStream) await activeStream.ready(data.stations[0].stopDistance);
+  const otherRoutes = networkData?.routes.filter(route => route.ref !== data.service) ?? [];
+  const mapStreams = new Map<NetworkRoute, SceneryStream>();
+  let mapStream: SceneryStream | undefined;
+  const heightAt = activeStream ? (x: number, z: number) => activeStream.heightAt(x, z) ?? mapStream?.heightAt(x, z)
     : (x: number, z: number) => groundHeight(pair!.terrain, x, -z);
   scene.add(scenery.group);
   const audit = options.get('audit') === 'trackbed';
@@ -110,7 +119,6 @@ async function run(): Promise<void> {
     group.rotateZ(rail.pose(distance, 6).cant);
   }
 
-  let dirty = true;
   let paused = false;
 
   function placeConsist(
@@ -159,6 +167,23 @@ async function run(): Promise<void> {
   let audio: AudioContext | undefined;
   const notice = element('notice');
   const routeSelect = element<HTMLSelectElement>('route-picker');
+  const stationSelect = element<HTMLSelectElement>('map-station');
+  const mapStations = new Map<number, Station>();
+  for (const route of networkData?.routes ?? []) {
+    for (const station of route.stations) mapStations.set(station.osmId, station);
+  }
+  stationSelect.add(new Option('Find station', ''));
+  for (const station of [...mapStations.values()].sort((a, b) => a.name.localeCompare(b.name, 'nb'))) {
+    stationSelect.add(new Option(station.name, String(station.osmId)));
+  }
+  stationSelect.addEventListener('change', () => {
+    const station = mapStations.get(Number(stationSelect.value));
+    if (!station) return;
+    const [east, north] = station.position;
+    cameras.fitMap(new Vector3(east, 0, -north), cab.group.position, 95);
+    element('fit-network').textContent = 'Fit network';
+    dirty = true;
+  });
   for (const route of routeCatalog) routeSelect.add(new Option(`${route.ref} · ${route.name}`, route.ref));
   routeSelect.value = data.service;
   routeSelect.hidden = routeCatalog.length < 2;
@@ -172,6 +197,35 @@ async function run(): Promise<void> {
   element('line').textContent = data.service;
   const departure = data.timetable ? timetableSeconds(data.timetable.departure) : 0;
   const arrival = data.timetable ? timetableSeconds(data.timetable.arrival) : 0;
+
+  function updateMapScenery(seconds: number, camera: Vector3, focus?: Vector3): void {
+    let target: NetworkRoute | undefined;
+    if (focus && !activeStream?.coversMapFocus(focus)) {
+      target = otherRoutes.find(route => route.tiles.some(tile => {
+        const bounds = tile.bounds;
+        return bounds && focus.x >= bounds[0] && focus.x <= bounds[2]
+          && -focus.z >= bounds[1] && -focus.z <= bounds[3];
+      }));
+    }
+    let next = target && mapStreams.get(target);
+    if (target && !next) {
+      next = new SceneryStream(target.tiles, maps, new Rail(target.rail), target.spans, sceneryError, sceneryChanged);
+      mapStreams.set(target, next);
+    }
+    if (mapStream !== next) {
+      mapStream?.update(0, camera);
+      mapStream?.group.removeFromParent();
+      if (next) scene.add(next.group);
+      mapStream = next;
+    }
+    if (next) {
+      next.setNight(night);
+      next.setWeather(weather);
+      next.update(seconds, camera, undefined, focus);
+    }
+    if (target && focus && next?.heightAt(focus.x, focus.z) !== undefined) world.dataset.detailLine = target.ref;
+    else delete world.dataset.detailLine;
+  }
 
   function showNotice(message: string): void {
     temporaryNotice = message;
@@ -193,6 +247,7 @@ async function run(): Promise<void> {
     if (cameras.view !== view) delete world.dataset.view;
     cameras.select(view);
     element('fit-network').hidden = !overview || view !== 'map';
+    stationSelect.hidden = !mapStations.size || view !== 'map';
     dirty = true;
     for (const selector of ['cab', 'chase', 'map']) {
       element(`${selector}-view`).setAttribute('aria-pressed', String(selector === view));
@@ -231,7 +286,8 @@ async function run(): Promise<void> {
       if (!overview) return;
       const expanded = cameras.mapHeight > 5000;
       cameras.fitMap(expanded ? cab.group.position : overview.center, cab.group.position,
-        expanded ? 530 : overview.fitHeight);
+        expanded ? 530 : overview.fitHeight, expanded);
+      stationSelect.value = '';
       element('fit-network').textContent = expanded ? 'Fit network' : 'Follow train';
     },
     day: () => { night = !night; configureWeather(); },
@@ -262,7 +318,7 @@ async function run(): Promise<void> {
     element(id).addEventListener('click', () => { dirty = true; action(); });
   }
   window.addEventListener('keydown', event => {
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.altKey || event.ctrlKey || event.metaKey || event.target instanceof HTMLSelectElement) return;
     const id = keys[event.key.toLowerCase()];
     if (!id) return;
     event.preventDefault();
@@ -280,6 +336,9 @@ async function run(): Promise<void> {
   renderer.domElement.addEventListener('wheel', event => {
     event.preventDefault();
     cameras.zoom(event.deltaY);
+    if (cameras.view === 'map') {
+      element('fit-network').textContent = cameras.mapHeight > 5000 ? 'Follow train' : 'Fit network';
+    }
     dirty = true;
   }, { passive: false });
 
@@ -302,9 +361,10 @@ async function run(): Promise<void> {
   let previousReversals = service.reversals;
   function frame(now: number): void {
     const frameStart = audit ? performance.now() : 0;
+    if (audit && !paused) performance.mark('station-frame-start');
     const elapsed = Math.min(0.1, Math.max(0, (now - previous) / 1000));
     previous = now;
-    if (paused && !dirty && cameras.settled) {
+    if (paused && !dirty && !cameras.needsUpdate) {
       requestAnimationFrame(frame);
       return;
     }
@@ -357,6 +417,7 @@ async function run(): Promise<void> {
     atmosphere.update(cab.group.position, cameras.camera.position, visualTime,
       inTunnel && cameras.view === 'cab');
     scenery.update(visualTime, cameras.camera.position, chainage, cameras.mapFocus);
+    updateMapScenery(visualTime, cameras.camera.position, cameras.mapFocus);
     renderer.render(scene, cameras.camera);
     if (now >= nextHud || paused) {
       if (audit) {
@@ -409,8 +470,11 @@ async function run(): Promise<void> {
       nextHud = now + 100;
     }
     if (audit && !paused) {
+      performance.mark('station-frame-end');
       performance.measure('station-frame', { start: frameStart, end: performance.now(), detail: now });
       performance.clearMeasures('station-frame');
+      performance.clearMarks('station-frame-start');
+      performance.clearMarks('station-frame-end');
     }
     requestAnimationFrame(frame);
   }

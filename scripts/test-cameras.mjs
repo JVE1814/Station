@@ -53,3 +53,20 @@ test('chase orbit stays inside the bore when the tunnel constrains it', () => {
   assert.ok(position.y >= 2.3 && position.y < 3.1);
   assert.equal(position.z, -19);
 });
+
+test('the map holds a selected station while the cab moves', () => {
+  const cameras = new Cameras();
+  const train = new Group();
+  const eye = new Vector3(0.38, 2.70, -9.33);
+  cameras.fitMap(new Vector3(170, 0, 65), train.position, 95);
+  for (let frame = 0; frame < 60; frame++) cameras.update(train, eye, 1 / 60);
+  const stationView = cameras.camera.position.clone();
+  train.position.set(700, 0, 140);
+  cameras.update(train, eye, 1 / 60);
+  assert.ok(cameras.camera.position.equals(stationView));
+  cameras.fitMap(train.position, train.position, 530, true);
+  for (let frame = 0; frame < 60; frame++) cameras.update(train, eye, 1 / 60);
+  train.position.x += 1;
+  cameras.update(train, eye, 1 / 60);
+  assert.equal(cameras.camera.position.x, 701);
+});

@@ -70,6 +70,7 @@ export class SceneryStream {
     private readonly mainRail: Rail,
     private readonly spans: TrackSpan[],
     private readonly onError: (error: unknown) => void,
+    private readonly onChange: () => void,
   ) {
     this.group.name = 'Streamed railway corridor';
     this.sharedTextures = new Set(Object.values(maps));
@@ -114,10 +115,15 @@ export class SceneryStream {
     return undefined;
   }
 
-  update(seconds: number, camera: Vector3, distance: number, focus?: Vector3): void {
-    const train = this.mainRail.position(distance);
-    const nearest = this.tiles.filter(tile => (tile.start <= distance + 3000 && tile.end >= distance - 2200)
-      || covers(tile, train.x, train.z, 400) || (focus && covers(tile, focus.x, focus.z, 250)));
+  coversMapFocus(focus: Vector3): boolean {
+    return this.tiles.some(tile => covers(tile, focus.x, focus.z));
+  }
+
+  update(seconds: number, camera: Vector3, distance?: number, focus?: Vector3): void {
+    const train = distance === undefined ? undefined : this.mainRail.position(distance);
+    const nearest = this.tiles.filter(tile => (distance !== undefined && tile.start <= distance + 3000
+      && tile.end >= distance - 2200) || (train && covers(tile, train.x, train.z, 400))
+      || (focus && covers(tile, focus.x, focus.z, 250)));
     const requested = new Set(nearest.map(tile => tile.id));
     for (const tile of nearest) {
       if (!this.loaded.has(tile.id) && !this.pending.has(tile.id) && !this.failures.has(tile.id)) {
@@ -187,6 +193,7 @@ export class SceneryStream {
       this.loaded.set(tile.id, scenery);
       this.terrain.set(tile.id, world.terrain);
       this.group.add(scenery.group);
+      this.onChange();
     } catch (error) {
       if (!transfer.signal.aborted) throw error;
     } finally {

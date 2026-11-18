@@ -22,8 +22,10 @@ export class Cameras {
   private readonly tunnelPosition = new Vector3();
   private readonly rotation = new Euler(0, 0, 0, 'YXZ');
   private mapGround: number | undefined;
+  private mapGroundMoving = false;
   private readonly orbit = new Spherical(24, 1.40, 2.48);
   private readonly mapOffset = new Vector3(0, 530, 0);
+  private mapAnchor?: Vector3;
   private mapLimit = 14000;
   private cabYaw = 0;
   private cabPitch = -0.095;
@@ -32,6 +34,10 @@ export class Cameras {
 
   get settled(): boolean {
     return this.transition <= 0;
+  }
+
+  get needsUpdate(): boolean {
+    return !this.settled || (this.view === 'map' && this.mapGroundMoving);
   }
 
   select(view: View): void {
@@ -50,9 +56,10 @@ export class Cameras {
     this.mapLimit = Math.max(this.mapLimit, height);
   }
 
-  fitMap(center: Vector3, source: Vector3, height: number): void {
+  fitMap(center: Vector3, source: Vector3, height: number, follow = false): void {
     this.allowMapExtent(height);
-    this.mapOffset.set(center.x - source.x, height, center.z - source.z);
+    this.mapAnchor = follow ? undefined : center.clone();
+    this.mapOffset.set(follow ? center.x - source.x : 0, height, follow ? center.z - source.z : 0);
     this.select('map');
     this.relocate();
   }
@@ -104,12 +111,13 @@ export class Cameras {
         this.destination.lerp(this.tunnelPosition, tunnel.weight);
       }
     } else {
-      this.target.copy(cab.position);
+      this.target.copy(this.mapAnchor ?? cab.position);
       this.target.x += this.mapOffset.x;
       this.target.z += this.mapOffset.z;
-      const elevation = groundAt?.(this.target.x, this.target.z) ?? this.target.y;
+      const elevation = groundAt?.(this.target.x, this.target.z) ?? cab.position.y;
       this.mapGround ??= this.target.y;
       this.mapGround += (elevation - this.mapGround) * (1 - Math.exp(-elapsed * 8));
+      this.mapGroundMoving = Math.abs(elevation - this.mapGround) > 0.1;
       this.target.y = this.mapGround;
       this.destination.copy(this.target);
       this.destination.y += this.mapOffset.y;

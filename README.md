@@ -2,7 +2,7 @@
 
 Station is a desktop browser train simulator. The service picker offers the full F4 to Bergen, F5 to Stavanger, F6 to Trondheim and the shorter R40 Seimsgrend–Bulken service. R40 is the default service and starts at 08:08 on the 18 November 2026 timetable.
 
-In Bird’s-eye view, **Fit network** shows all three intercity routes. Use the mouse wheel to zoom and drag to pan. **Follow train** returns the map to the running service.
+In Bird’s-eye view, **Fit network** shows all three intercity routes. Use the mouse wheel to zoom and drag to pan. On an intercity service, **Find station** brings the camera down to a mapped platform on any of the three lines while the train continues its service. **Follow train** in the network view returns the map to the running train.
 
 ## Run
 
@@ -55,5 +55,7 @@ npm run data
 ```
 
 Run all automated checks with `npm run verify` or the station-pair checks with `npm run verify:pair`. The full run audits 169 scenery tiles and exercises accelerated service replays before browser verification. The verification runner reports each check separately. The browser check expects Chromium at `/usr/bin/chromium`; set `CHROMIUM_PATH` for a different installation. `npm run verify:browser -- --captures` writes 1080p captures to `evidence/`.
+
+On a software WebGL renderer the timing check uses Chromium’s renderer thread CPU clock as a proxy and reports wall frame intervals separately. A hardware renderer uses the wall frame intervals for the timing limit.
 
 The playable checkpoint and its side-by-side screenshots are indexed in [evidence](evidence/README.md). See [PROGRESS.md](PROGRESS.md) for review status and [ASSETS.md](ASSETS.md) for attribution.

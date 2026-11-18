@@ -81,6 +81,7 @@ export class Atmosphere {
   private readonly fill = new HemisphereLight(0xc3e0ff, 0x76684e, 2.2);
   private readonly fog = new FogExp2(0xb4c9d5, 0.00017);
   private readonly shadowCenter = new Vector3(Infinity, 0, 0);
+  private readonly shadowDirection = new Vector3();
   private readonly sunOffset = new Vector3(-135, 78, 94);
   private readonly cloudTextures = new Map<Sky, DataTexture>();
   private readonly dome = new Mesh(
@@ -94,9 +95,11 @@ export class Atmosphere {
   private sunLevel = 2.7;
   private fillLevel = 1.58;
   private shelter = 0;
+  private liveStockShadows = true;
 
-  constructor(private readonly scene: Scene) {
+  constructor(private readonly scene: Scene, stockShadowLayer: number) {
     this.sun.castShadow = true;
+    this.sun.shadow.camera.layers.enable(stockShadowLayer);
     this.sun.shadow.mapSize.set(1024, 1024);
     this.sun.shadow.autoUpdate = false;
     this.sun.shadow.camera.left = -95;
@@ -152,17 +155,32 @@ export class Atmosphere {
     this.particles.visible = weather !== 'clear';
   }
 
-  update(position: Vector3, cameraPosition: Vector3, elapsed: number, underCover = false): void {
+  update(position: Vector3, cameraPosition: Vector3, elapsed: number, underCover: boolean, liveStockShadows: boolean): void {
     this.shelter += (Number(underCover) - this.shelter) * (1 - Math.exp(-elapsed * 4));
     this.sun.intensity = this.sunLevel * (1 - this.shelter * 0.995);
     this.fill.intensity = this.fillLevel * (1 - this.shelter * 0.93);
     this.dome.position.copy(cameraPosition);
     this.dome.updateMatrixWorld();
     this.fog.density = this.density / (1 + Math.max(0, cameraPosition.y - position.y) / 500);
-    if (this.shadowCenter.distanceToSquared(position) >= 0.85 ** 2) {
+    const viewChanged = this.liveStockShadows !== liveStockShadows;
+    if (viewChanged) {
+      this.liveStockShadows = liveStockShadows;
+      const extent = liveStockShadows ? 95 : 150;
+      const camera = this.sun.shadow.camera;
+      camera.left = camera.bottom = -extent;
+      camera.right = camera.top = extent;
+      camera.updateProjectionMatrix();
+    }
+    // Reuse the corridor's static shadows while looking out of the cab or down from a high map view.
+    const refreshDistance = liveStockShadows ? 0.85 : 95;
+    if (viewChanged || this.shadowCenter.distanceToSquared(position) >= refreshDistance ** 2) {
       this.shadowCenter.copy(position);
       this.sun.target.position.copy(position);
-      this.sun.position.copy(position).add(this.sunOffset);
+      if (!liveStockShadows) {
+        this.shadowDirection.copy(cameraPosition).sub(position).setY(0).normalize();
+        this.sun.target.position.addScaledVector(this.shadowDirection, 60);
+      }
+      this.sun.position.copy(this.sun.target.position).add(this.sunOffset);
       this.sun.target.updateMatrixWorld();
       this.sun.updateMatrixWorld();
       this.sun.shadow.needsUpdate = true;

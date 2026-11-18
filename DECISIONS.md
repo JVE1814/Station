@@ -16,3 +16,4 @@
 - Preserve mapped building footprints when an inferred roof overlaps the railway. Use an operational passage 7.2 m wide and 6.7 m high where needed, respect mapped minimum heights and leave canopy sides open.
 - Mesh platform decks along the adjacent surveyed alignment. Adjust a mapped platform edge only where the raw footprint intrudes into the 1.85 m loading-gauge setback. Place generated signals, catenary supports and station furniture outside the nearest running alignments.
 - Use a cubic plan spline bounded to 0.35 m from the source polyline between samples. Compute longitudinal grades from the fitted height profile over its distance along the track.
+- Cache the corridor shadow view when looking forward from the cab or down from a high map position. Keep the faster stock-shadow updates for exterior views, close map views and nearby traffic.

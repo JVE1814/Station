@@ -76,3 +76,9 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - Batches now use physical terrain patch dimensions across DEM resolutions, combine distant spruce into larger tiles, and combine fixed cab parts without changing the gauge and lever animations. Static scenery matrices update only when each tile is built. At the same R40 cab diagnostic position, visible ground meshes fell from 133 to 26 and distant forest batches from 60 to 16.
 - Typecheck, lint, 20 tests and the static build passed. Rechecked 1,302 R40 trackbed probes and 21,780 coach probes. The worst gap stayed 0.305 m and no coach probe intersected an obstacle. The full timed browser check still needs the new build.
 - Captured the optimized production build at 1920 × 1080 for each view by day, night and snow. Chromium recorded zero console errors and zero external requests. The reference comparisons in `evidence/` use this capture set.
+
+## Cab frame profiling
+
+- The second cab sample recorded 12.48 ms on the SwiftShader CPU proxy, despite reducing the last frame to 274 draws. The chase view measured 6.63 ms. A separate phase trace found most of the cab work inside the WebGL render call.
+- Instanced moving door components and merged rigid opaque stock casters for the depth pass. The tests check both door sides, texture and shadow flags, and retained geometry. Added a wider cached shadow view for the cab and high map, kept live stock shadows where the train is visible, and draw opaque cockpit depth before scenery.
+- The fresh 1080p check will run on the latest build after the driving and earlier browser sessions close.

@@ -56,6 +56,6 @@ npm run data
 
 Run all automated checks with `npm run verify` or the station-pair checks with `npm run verify:pair`. The full run audits 169 scenery tiles and exercises accelerated service replays before browser verification. The verification runner reports each check separately. The browser check expects Chromium at `/usr/bin/chromium`; set `CHROMIUM_PATH` for a different installation. `npm run verify:browser -- --captures` writes 1080p captures to `evidence/`.
 
-On a software WebGL renderer the timing check uses Chromium’s renderer thread CPU clock as a proxy and reports wall frame intervals separately. A hardware renderer uses the wall frame intervals for the timing limit.
+On a software WebGL renderer the timing check uses Chromium’s renderer thread CPU clock as a proxy and reports wall frame intervals separately. A hardware renderer uses the wall frame intervals for the timing limit. Run `npm run verify -- --captures` to refresh the view captures during the full review.
 
 The playable checkpoint and its side-by-side screenshots are indexed in [evidence](evidence/README.md). See [PROGRESS.md](PROGRESS.md) for review status and [ASSETS.md](ASSETS.md) for attribution.

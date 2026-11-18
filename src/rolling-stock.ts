@@ -10,8 +10,13 @@ import {
   ConeGeometry,
   CylinderGeometry,
   DoubleSide,
+  DynamicDrawUsage,
+  FrontSide,
   Group,
+  InstancedMesh,
+  Matrix4,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   PlaneGeometry,
   PointLight,
@@ -25,6 +30,8 @@ import {
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+export const ROLLING_STOCK_SHADOW_LAYER = 1;
 
 export interface TrainVisualState {
   speed: number;
@@ -110,7 +117,8 @@ function panel(group: Group, material: MeshStandardMaterial, corners: readonly (
 function batchRigidParts(group: Group) {
   const batches = new Map<string, Mesh<BufferGeometry, MeshStandardMaterial>[]>();
   for (const object of group.children) {
-    if (!(object instanceof Mesh) || !(object.material instanceof MeshStandardMaterial)) continue;
+    if (!(object instanceof Mesh) || object instanceof InstancedMesh ||
+      !(object.material instanceof MeshStandardMaterial)) continue;
     const key = [object.material.id, object.castShadow, object.receiveShadow, object.geometry.index !== null].join('/');
     const batch = batches.get(key) ?? [];
     batch.push(object);
@@ -134,6 +142,58 @@ function batchRigidParts(group: Group) {
     group.remove(...batch);
     group.add(combined);
   }
+}
+
+const opaqueShadow = new MeshBasicMaterial();
+
+function batchRigidShadow(group: Group, fixedChildren: readonly Group[] = []) {
+  const casters: { mesh: Mesh; transform: Matrix4 }[] = [];
+  let draws = 0;
+  for (const mount of [group, ...fixedChildren]) {
+    if (mount !== group) mount.updateMatrix();
+    for (const mesh of mount.children) {
+      if (!(mesh instanceof Mesh) || mesh instanceof InstancedMesh || !mesh.visible ||
+        !mesh.castShadow || mesh.customDepthMaterial) continue;
+      const geometry: BufferGeometry = mesh.geometry;
+      const { material } = mesh;
+      if (geometry.drawRange.start !== 0 || geometry.drawRange.count !== Infinity) continue;
+      const surfaces = Array.isArray(material) ? material : [material];
+      if (!surfaces.every(surface => surface instanceof MeshStandardMaterial && surface.visible &&
+        surface.side === FrontSide && surface.shadowSide === null && !surface.transparent &&
+        !surface.alphaTest && !surface.alphaToCoverage && !surface.alphaMap &&
+        !surface.displacementMap && !surface.clippingPlanes?.length)) continue;
+      if (Array.isArray(material)) {
+        let index = 0;
+        const contiguous = geometry.groups.every((part) => {
+          if (part.start !== index || !material[part.materialIndex!]) return false;
+          index += part.count;
+          return true;
+        });
+        if (!contiguous || index !== (geometry.index?.count ?? geometry.attributes.position.count)) continue;
+      }
+      mesh.updateMatrix();
+      const transform = mesh.matrix.clone();
+      if (mount !== group) transform.premultiply(mount.matrix);
+      if (transform.determinantAffine() < 0) continue;
+      casters.push({ mesh, transform });
+      draws += Array.isArray(material) ? geometry.groups.length : 1;
+    }
+  }
+  if (draws < 2) return;
+  const geometry = mergeGeometries(casters.map(({ mesh, transform }) => {
+    const source = mesh.geometry;
+    const positions = source.attributes.position.clone();
+    const indices = source.index ?? Array.from({ length: positions.count }, (_, index) => index);
+    return new BufferGeometry().setAttribute('position', positions).setIndex(indices).applyMatrix4(transform);
+  }));
+  if (!geometry) throw new Error('Incompatible rolling stock shadow geometry');
+
+  const proxy = new Mesh(geometry, opaqueShadow);
+  proxy.name = 'Rigid rolling stock shadow';
+  proxy.layers.set(ROLLING_STOCK_SHADOW_LAYER);
+  proxy.castShadow = true;
+  for (const { mesh } of casters) mesh.castShadow = false;
+  group.add(proxy);
 }
 
 function rimProfile(width: number, base: number, shoulder: number, height: number, z: number) {
@@ -219,6 +279,7 @@ function buildBogie(body: Group, dark: MeshStandardMaterial, steel: MeshStandard
     }
   }
   batchRigidParts(bogie);
+  batchRigidShadow(bogie);
   body.add(bogie);
   return bogie;
 }
@@ -239,15 +300,69 @@ function makeTrainMaterials() {
   ));
 }
 
+function slidingDoors(group: Group, materials: ReturnType<typeof makeTrainMaterials>) {
+  const sides = [-1, 1] as const;
+  const doorways = [-9.34, 9.42];
+  const leaves = sides.flatMap(side => doorways.flatMap(doorway =>
+    [-1, 1].map(leaf => ({ side, leaf, center: doorway + leaf * 0.393 })),
+  ));
+  const leafBodies = new InstancedMesh(new BoxGeometry(0.047, 1.84, 0.755), materials.siding.clone(), leaves.length);
+  const glazing = new InstancedMesh(new BoxGeometry(0.051, 0.81, 0.639), materials.glass.clone(), leaves.length);
+  const buttons = new InstancedMesh(new CylinderGeometry(0.052, 0.052, 0.013, 18),
+    materials.reflector.clone(), leaves.length);
+  leafBodies.name = 'Passenger door leaves';
+  glazing.name = 'Passenger door glazing';
+  buttons.name = 'Passenger door buttons';
+  leafBodies.castShadow = leafBodies.receiveShadow = true;
+  glazing.castShadow = glazing.receiveShadow = true;
+  const parts = [leafBodies, glazing, buttons];
+  const travel = 0.70;
+  const translation = new Matrix4();
+  const button = new Matrix4().makeRotationZ(Math.PI / 2);
+  let left = 0;
+  let right = 0;
+  const place = () => {
+    leaves.forEach(({ side, leaf, center }, index) => {
+      const z = center + leaf * travel * (side === -1 ? left : right);
+      const x = side * 1.536;
+      leafBodies.setMatrixAt(index, translation.setPosition(x, 2.005, z));
+      glazing.setMatrixAt(index, translation.setPosition(x + side * 0.023, 2.335, z));
+      buttons.setMatrixAt(index, button.setPosition(x + side * 0.03, 1.775, z - leaf * 0.22));
+    });
+    for (const part of parts) part.instanceMatrix.needsUpdate = true;
+  };
+  place();
+  for (const part of parts) {
+    part.instanceMatrix.setUsage(DynamicDrawUsage);
+    part.computeBoundingBox();
+    part.computeBoundingSphere();
+    // Cover the whole animation without recomputing bounds on each movement.
+    part.boundingBox!.min.z -= travel;
+    part.boundingBox!.max.z += travel;
+    part.boundingSphere!.radius += travel;
+  }
+  group.add(...parts);
+  return (state: TrainVisualState) => {
+    const fraction = 1 - Math.exp(-5.65 * (state.deltaSeconds ?? (1 / 60)));
+    const leftTarget = Number(state.doorsOpen && state.doorSide !== 1);
+    const rightTarget = Number(state.doorsOpen && state.doorSide !== -1);
+    const nextLeft = left + (leftTarget - left) * fraction;
+    const nextRight = right + (rightTarget - right) * fraction;
+    if (nextLeft === left && nextRight === right) return;
+    left = nextLeft;
+    right = nextRight;
+    place();
+  };
+}
+
 function fitExtDetails(
   body: Group,
   materials: ReturnType<typeof makeTrainMaterials>,
   leading: boolean,
   windows: MeshStandardMaterial,
 ) {
-  const { siding, trim, underframe, metal, reflector, rubber, glass } = materials;
-  const doors: { mesh: Group; travel: number; center: number; side: -1 | 1 }[] = [];
-  for (const side of [-1, 1] as const) {
+  const { trim, underframe, metal, reflector, rubber } = materials;
+  for (const side of [-1, 1]) {
     box(body, trim, [0.03, 0.77, 20.3], [side * 1.494, 2.50, 0.73]);
     box(body, reflector, [0.032, 0.025, 20.3], [side * 1.5, 1.66, 0.73]);
     box(body, trim, [0.026, 0.115, 21.0], [side * 1.488, 1.08, 0.45]);
@@ -261,16 +376,6 @@ function fitExtDetails(
     for (const doorway of [-9.34, 9.42]) {
       box(body, rubber, [0.060, 1.93, 1.59], [side * 1.498, 2.00, doorway]);
       box(body, metal, [0.09, 0.055, 1.72], [side * 1.53, 1.032, doorway]);
-      for (const leaf of [-1, 1]) {
-        const hinge = new Group();
-        hinge.position.set(side * 1.536, 2.005, doorway + leaf * 0.393);
-        box(hinge, siding, [0.047, 1.84, 0.755], [0, 0, 0]);
-        box(hinge, glass, [0.051, 0.81, 0.639], [side * 0.023, 0.33, 0]);
-        cylinder(hinge, reflector, 0.052, 0.013, [side * 0.03, -0.23, -leaf * 0.22]).rotation.z = Math.PI / 2;
-        batchRigidParts(hinge);
-        doors.push({ mesh: hinge, travel: leaf * 0.70, center: hinge.position.z, side });
-        body.add(hinge);
-      }
     }
 
     for (const z of [-5.2, 0.1, 4.75]) {
@@ -311,7 +416,6 @@ function fitExtDetails(
     box(body, rubber, [1.73, 2.26, 0.19], [0, 2.1, -11.86]);
     box(body, underframe, [0.25, 0.18, 0.45], [0, 0.58, -11.87]);
   }
-  return doors;
 }
 
 function noseDetails(body: Group, trim: MeshStandardMaterial) {
@@ -445,13 +549,15 @@ export function createTrain(leading = true, brushedSteel?: Texture) {
   shell(group, [siding, paint, underframe], leading);
   const windowMaterial = surface(0x263744, 0.14, 0.2);
   windowMaterial.emissive.setHex(0xfda655);
-  const doors = fitExtDetails(group, materials, leading, windowMaterial);
+  fitExtDetails(group, materials, leading, windowMaterial);
+  const updateDoors = slidingDoors(group, materials);
   const lights = leading ? noseDetails(group, trim) : undefined;
   const bogies: [Group, Group] = [
     buildBogie(group, underframe, metal, -8.3),
     buildBogie(group, underframe, metal, 8.3),
   ];
   batchRigidParts(group);
+  batchRigidShadow(group);
   function update(state: TrainVisualState) {
     windowMaterial.emissiveIntensity = state.night ? 0.75 : 0.025;
     if (lights) {
@@ -464,12 +570,7 @@ export function createTrain(leading = true, brushedSteel?: Texture) {
         halo.visible = state.night;
       }
     }
-    const fraction = 1 - Math.exp(-5.65 * (state.deltaSeconds ?? (1 / 60)));
-    for (const door of doors) {
-      const open = state.doorsOpen && (!state.doorSide || state.doorSide === door.side);
-      const target = door.center + (open ? door.travel : 0);
-      door.mesh.position.z += (target - door.mesh.position.z) * fraction;
-    }
+    updateDoors(state);
   }
 
   return { group, bogies, update };
@@ -688,6 +789,7 @@ function makeCabGeometry(group: Group, grain?: Texture) {
   batchRigidParts(dash);
   batchRigidParts(controls);
   batchRigidParts(group);
+  batchRigidShadow(group, [dash, controls]);
   return { speed, pressure, power, reservoir, throttle, brake, amber, green, fill };
 }
 
@@ -696,6 +798,12 @@ export function createCab(grain?: Texture) {
   const eye = new Vector3(0.38, 2.70, -9.33);
   const instruments = makeCabGeometry(group, grain);
   const headlight = trainHeadlight(group);
+  // Opaque cockpit depth prevents shading scenery hidden by the desk and window frames.
+  group.traverse(object => {
+    if (object instanceof Mesh && !Array.isArray(object.material) && !object.material.transparent) {
+      object.renderOrder = -10;
+    }
+  });
   function update(state: TrainVisualState) {
     instruments.speed(state.speed * 3.6, state.night);
     instruments.pressure(5 - 3.65 * state.brake, state.night);
@@ -705,7 +813,8 @@ export function createCab(grain?: Texture) {
     instruments.brake.rotation.x = -0.51 + state.brake * 1.05;
     instruments.amber.emissiveIntensity = state.doorsOpen ? 1.4 : 0.1;
     instruments.green.emissiveIntensity = state.doorsOpen ? 0.08 : 0.8;
-    instruments.fill.intensity = state.night ? 1.95 : 0.25;
+    instruments.fill.intensity = 1.95;
+    instruments.fill.visible = state.night;
     headlight.visible = state.night;
   }
   return { group, eye, update };

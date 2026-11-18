@@ -10,6 +10,7 @@ import {
   Group,
   InstancedMesh,
   Mesh,
+  MeshDepthMaterial,
   MeshLambertMaterial,
   MeshStandardMaterial,
   Matrix4,
@@ -63,6 +64,7 @@ const TUNNEL_HALF_WIDTH = 4.2;
 const TUNNEL_SPRINGLINE = 2.2;
 const TUNNEL_RISE = 4.02;
 const TUNNEL_CUT_MARGIN = 0.45;
+const opaqueInstancedDepth = new MeshDepthMaterial();
 
 function smoothstep(value: number) {
   const amount = Math.max(0, Math.min(1, value));
@@ -97,6 +99,8 @@ function texture(size: number, draw: (context: CanvasRenderingContext2D) => void
 
 function aggregate(geometry: BufferGeometry, surface: Material, values: Transform[]) {
   const mesh = new InstancedMesh(geometry, surface, values.length);
+  // Keep static opaque instance shadows on their own program variant.
+  if (surface.alphaTest === 0 && !surface.alphaToCoverage) mesh.customDepthMaterial = opaqueInstancedDepth;
   const dummy = new Object3D();
   values.forEach((entry, index) => {
     dummy.position.copy(entry.position);
@@ -1277,7 +1281,11 @@ function addPlatforms(
     face.emissive.setHex(0x666666);
     face.emissiveIntensity = 0.34;
     const rotation = new Quaternion().setFromUnitVectors(X, along);
-    const board = new Mesh(new BoxGeometry(3.2, 0.75, 0.095), [metal, metal, metal, metal, face, face]);
+    const boardGeometry = new BoxGeometry(3.2, 0.75, 0.095);
+    boardGeometry.clearGroups();
+    boardGeometry.addGroup(0, 24, 0);
+    boardGeometry.addGroup(24, 12, 1);
+    const board = new Mesh(boardGeometry, [metal, face]);
     board.quaternion.copy(rotation);
     board.position.copy(sign);
     board.name = 'Platform furniture';

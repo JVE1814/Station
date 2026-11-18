@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 
 const failures = [];
+const browserFlags = process.argv.includes('--captures') ? ['--', '--captures'] : [];
 function check(label, command, arguments_) {
   console.log(`\n${label}`);
   const result = spawnSync(command, arguments_, { stdio: 'inherit', env: process.env });
@@ -16,13 +17,11 @@ if (check('Clean install', 'npm', ['ci'])) {
   check('Tests', 'npm', ['test']);
   const built = check('Production build', 'npm', ['run', 'build']);
   check('R40 geography and autopilot', process.execPath, ['scripts/verify-world.mjs']);
+  if (built) check('R40 1080p browser frame timing', 'npm', ['run', 'verify:browser', ...browserFlags]);
   const network = check('F4, F5 and F6 network geography and autopilot', process.execPath, ['scripts/verify-coverage.mjs']);
   if (network) check('Intercity rendered geometry clearance', process.execPath, ['scripts/verify-network-clearance.mjs']);
   check('R40 rendered geometry clearance', process.execPath, ['scripts/verify-clearance.mjs']);
-  if (built) {
-    check('R40 1080p browser frame timing', 'npm', ['run', 'verify:browser']);
-    if (network) check('Offline browser startup for all intercity services', 'npm', ['run', 'verify:network-browser']);
-  }
+  if (built && network) check('Offline browser startup for all intercity services', 'npm', ['run', 'verify:network-browser']);
   check('1080p review captures', process.execPath, ['scripts/verify-evidence.mjs']);
 }
 if (failures.length) {

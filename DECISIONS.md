@@ -19,3 +19,13 @@
 - Cache the corridor shadow view when looking forward from the cab or down from a high map position. Keep the faster stock-shadow updates for exterior views, close map views and nearby traffic.
 - Enable the R40 driving profile at service creation. The power and brake handles have five active notches each, with separate traction and brake-pipe ramps. Rain and snow reduce available traction and braking. Intercity services use the existing profile.
 - Keep the seven-metre platform tolerance as the door interlock on R40. Use deterministic simulated rider counts, a boarding dwell and a per-stop score for accuracy, time and comfort. The optional tutorial practices the same train controls at Evanger and restarts the passenger run on return.
+
+## Evanger–Voss showpiece
+
+- Use the OSM-selected Evanger → Seimsgrend → Bulken → Voss alignment and dated 08:01 R40 all-stops service. The new route is the landing service and the earlier Seimsgrend–Bulken pair remains selectable.
+- Use the saved original renderer for the before frames. The before renderer has its existing daytime light. Its capture-only route loader and camera framing use the same mapped positions as the showpiece.
+- Apply the golden-hour treatment, graphics presets and enhanced driving model to the R40 showpiece. Intercity lines retain their existing materials and physical limits.
+- Use a solar altitude of roughly ten degrees as the late-September artistic lighting setup. Night uses blue-hour sky and lit rolling stock. All hero output is rendered from the running application at Ultra.
+- Frame the chase above the sampled ground. Use the same grounded camera and the same Kartverket terrain grids for the saved before build and the new renderer.
+- Keep gameplay time on the existing fixed-step integrator when the browser falls behind. Limit the per-frame wall-clock catch-up to 350 ms on R40. Camera and particle motion retain their 100 ms cap.
+- Report calls and triangles on software WebGL. The 16.7 ms timing threshold applies to hardware High at 1920 × 1080.

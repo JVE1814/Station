@@ -98,7 +98,7 @@ export class Atmosphere {
   private shelter = 0;
   private liveStockShadows = true;
 
-  constructor(private readonly scene: Scene, stockShadowLayer: number) {
+  constructor(private readonly scene: Scene, stockShadowLayer: number, showpiece = false) {
     this.sun.castShadow = true;
     this.sun.shadow.camera.layers.enable(stockShadowLayer);
     this.sun.shadow.mapSize.set(1024, 1024);
@@ -110,18 +110,18 @@ export class Atmosphere {
     this.sun.shadow.camera.far = 360;
     this.sun.shadow.normalBias = 0.06;
     this.sun.shadow.bias = -0.00018;
-    this.scene.add(this.sun, this.sun.target, this.fill);
+    if (!showpiece) this.scene.add(this.sun, this.sun.target, this.fill);
     this.scene.fog = this.fog;
     this.dome.scale.setScalar(11000);
     this.dome.renderOrder = -1000;
     this.dome.frustumCulled = false;
-    this.scene.add(this.dome);
+    if (!showpiece) this.scene.add(this.dome);
 
     this.positions = new Float32Array(1600 * 3);
     for (let index = 0; index < this.positions.length; index += 3) {
-      this.positions[index] = (Math.random() - 0.5) * 68;
+      this.positions[index] = (Math.random() - 0.5) * (showpiece ? 100 : 68);
       this.positions[index + 1] = Math.random() * 33;
-      this.positions[index + 2] = (Math.random() - 0.5) * 68;
+      this.positions[index + 2] = (Math.random() - 0.5) * (showpiece ? 100 : 68);
     }
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new BufferAttribute(this.positions, 3));

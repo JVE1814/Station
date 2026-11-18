@@ -19,6 +19,12 @@ import { SceneryStream } from './streaming';
 import { Traffic } from './traffic';
 import { groundHeight, timetableSeconds } from './world-data';
 import type { Station, WorldData } from './world-data';
+import { frameHero, heroShots } from './hero';
+import { parseQuality, ShowpieceLight } from './showpiece-light';
+import { ShowpiecePanel, StoppingMarker } from './showpiece-ui';
+import { DrivingTutorial } from './driving';
+import { createLakesideProfile, StationAudio } from './audio';
+import { WaterReflection } from './water-reflection';
 import './style.css';
 
 function element<T extends HTMLElement = HTMLElement>(id: string): T {
@@ -29,15 +35,19 @@ function element<T extends HTMLElement = HTMLElement>(id: string): T {
 
 async function run(): Promise<void> {
   const options = new URLSearchParams(location.search);
-  const ref = options.get('line');
-  const networkData = ref && ['F4', 'F5', 'F6'].includes(ref) ? await loadNetworkRoute(ref) : null;
+  const ref = options.get('line') ?? 'R40';
+  const networkData = ref && ['R40', 'F4', 'F5', 'F6'].includes(ref) ? await loadNetworkRoute(ref) : null;
   const network = networkData?.line;
   const pair = network ? null : await readWorldAsset<WorldData>('data/service.json');
   if (!network && !pair) throw new Error('The offline service file could not be loaded.');
   const data = network ? { ...network, service: network.ref } : pair!;
   const rail = new Rail(data.rail);
-  const service = new Service(data, rail);
-  const traffic = network?.traffic?.length ? new Traffic(data, rail, service, network.traffic) : null;
+  const shot = network?.ref === 'R40' && options.has('hero') ? heroShots(network).find(item => item.id === options.get('hero')) : undefined;
+  const showpiece = network?.ref === 'R40';
+  const start = shot ? { distance: shot.distance, speed: shot.speed, nextIndex: Math.max(1, data.stations.findIndex(station => station.stopDistance > shot.distance)) } : undefined;
+  let service = new Service(data, rail, { ...start, driving: showpiece });
+  let traffic = network?.traffic?.length ? new Traffic(data, rail, service, network.traffic) : null;
+  const quality = parseQuality(options.get('quality') ?? localStorage.getItem('station-r40-quality'));
   const scene = new Scene();
   scene.matrixAutoUpdate = false;
   // Tile transforms are set when built. Moving stock, lighting and map labels update their own matrices.
@@ -69,7 +79,9 @@ async function run(): Promise<void> {
   const [grass, ballast, spruce, siding, roofing, dashboard, steel] = await Promise.all([
     'grass', 'ballast', 'spruce', 'siding', 'roofing', 'dashboard', 'steel',
   ].map(loadMap));
-  const maps = { grass, ballast, spruce, siding, roofing };
+  const pineAndBirch = showpiece ? await loadMap('norway-trees') : undefined;
+  const waterReflection = showpiece ? new WaterReflection() : undefined;
+  const maps = { grass, ballast, spruce, siding, roofing, pineAndBirch, waterReflection, polished: showpiece };
   let dirty = true;
   const sceneryChanged = () => { dirty = true; };
   const sceneryError = (error: unknown) => {
@@ -79,7 +91,7 @@ async function run(): Promise<void> {
   const activeStream = network
     ? new SceneryStream(network.tiles, maps, rail, data.spans, sceneryError, sceneryChanged) : undefined;
   const scenery = activeStream ?? createScenery(pair!, rail, maps);
-  if (activeStream) await activeStream.ready(data.stations[0].stopDistance);
+  if (activeStream) await activeStream.ready(service.chainage(), shot ? 2300 : 0);
   const otherRoutes = networkData?.routes.filter(route => route.ref !== data.service) ?? [];
   const mapStreams = new Map<NetworkRoute, SceneryStream>();
   let mapStream: SceneryStream | undefined;
@@ -101,8 +113,34 @@ async function run(): Promise<void> {
     if (pair) world.dataset.trackbedAudit = JSON.stringify(auditTrackbed(scenery.group, rail, pair));
   }
   world.dataset.stage = 'rolling-stock';
-  const atmosphere = new Atmosphere(scene, ROLLING_STOCK_SHADOW_LAYER);
-  const cameras = new Cameras();
+  const atmosphere = new Atmosphere(scene, ROLLING_STOCK_SHADOW_LAYER, showpiece);
+  const cameras = new Cameras(showpiece && !shot);
+  const lighting = showpiece ? new ShowpieceLight(scene, cameras.camera, ROLLING_STOCK_SHADOW_LAYER, quality) : undefined;
+  if (lighting) renderer.info.autoReset = false;
+  const panel = showpiece ? new ShowpiecePanel() : undefined;
+  const marker = showpiece ? new StoppingMarker() : undefined;
+  const audio = new StationAudio();
+  const lakesideAt = createLakesideProfile(data, rail);
+  let tutorial: DrivingTutorial | undefined;
+  if (showpiece) {
+    document.body.classList.add('showpiece');
+    element('geo-credits').textContent = '© OpenStreetMap contributors · Kartverket · Entur';
+    for (const id of ['brake-cue', 'quality', 'retry', 'tutorial', 'mute', 'brake-notch', 'power-notch']) element(id).hidden = false;
+    element<HTMLSelectElement>('quality').value = quality;
+    element<HTMLSelectElement>('quality').addEventListener('change', event => {
+      const selector = event.target as HTMLSelectElement;
+      const preset = parseQuality(selector.value);
+      lighting?.setQuality(preset);
+      localStorage.setItem('station-r40-quality', preset);
+      selector.blur();
+      dirty = true;
+    });
+  }
+  if (marker) scene.add(marker.group);
+  if (shot) {
+    frameHero(cameras, shot, rail.position(shot.distance));
+    document.body.classList.add('hero-capture');
+  }
   const outline = !networkData && routeCatalog.length > 1
     ? await readWorldAsset<OverviewRoute[]>('data/overview-r40.json.gz') : null;
   const overview = networkData ? new NetworkOverview(networkData.routes)
@@ -111,9 +149,11 @@ async function run(): Promise<void> {
     scene.add(overview.group);
     cameras.allowMapExtent(overview.fitHeight * 1.35);
   }
-  const cab = createCab(dashboard);
-  const coaches = [createTrain(true, steel), createTrain(false, steel), createTrain(true, steel)];
+  const cab = createCab(dashboard, showpiece);
+  const coaches = [createTrain(true, steel, showpiece), createTrain(false, steel, showpiece), createTrain(true, steel, showpiece)];
   scene.add(cab.group, ...coaches.map(coach => coach.group));
+  lighting?.addTree(cab.group);
+  for (const coach of coaches) lighting?.addTree(coach.group);
   const trafficModels = new Map<string, ReturnType<typeof createTrain>[]>();
   const matrix = new Matrix4();
   const up = new Vector3(0, 1, 0);
@@ -122,6 +162,7 @@ async function run(): Promise<void> {
   const stockFront = new Vector3();
   const stockRear = new Vector3();
   const bogieAim = new Vector3();
+  const boardingSills = Array.from({ length: 12 }, () => new Vector3());
   const stockPose: RailPose = { position: new Vector3(), tangent: new Vector3(), cant: 0 };
 
   function place(group: Group, distance: number): void {
@@ -133,7 +174,7 @@ async function run(): Promise<void> {
     group.rotateZ(rail.pose(distance, 6, stockPose).cant);
   }
 
-  let paused = false;
+  let paused = Boolean(shot);
 
   function placeConsist(
     consist: ReturnType<typeof createTrain>[],
@@ -161,7 +202,7 @@ async function run(): Promise<void> {
       });
       coach.group.visible = !(hideNose && index === leadIndex);
       coach.update({ ...movement.controls, speed: movement.state.speed, night: night || movement.trackSpan.tunnel, deltaSeconds: elapsed,
-        headlights: index === leadIndex });
+        headlights: index === leadIndex, weather });
       if (coach.group.visible) coach.group.updateMatrixWorld();
     });
   }
@@ -169,6 +210,7 @@ async function run(): Promise<void> {
   function resize(): void {
     dirty = true;
     renderer.setSize(world.clientWidth, world.clientHeight);
+    lighting?.resize(world.clientWidth, world.clientHeight, renderer.getPixelRatio());
     cameras.camera.aspect = world.clientWidth / world.clientHeight;
     cameras.camera.updateProjectionMatrix();
   }
@@ -180,7 +222,6 @@ async function run(): Promise<void> {
   let timeScale = 1;
   let temporaryNotice = '';
   let noticeUntil = 0;
-  let audio: AudioContext | undefined;
   const notice = element('notice');
   const routeSelect = element<HTMLSelectElement>('route-picker');
   const stationSelect = element<HTMLSelectElement>('map-station');
@@ -202,14 +243,17 @@ async function run(): Promise<void> {
     dirty = true;
   });
   for (const route of routeCatalog) routeSelect.add(new Option(`${route.ref} · ${route.name}`, route.ref));
-  routeSelect.value = data.service;
+  routeSelect.value = pair ? 'R40-short' : data.service;
   routeSelect.hidden = routeCatalog.length < 2;
   routeSelect.addEventListener('change', () => {
     const destination = new URL(window.location.href);
     destination.searchParams.set('line', routeSelect.value);
-    destination.searchParams.delete('audit');
+    for (const key of ['audit', 'hero', 'look']) destination.searchParams.delete(key);
     location.assign(destination.href);
   });
+  if (shot && options.get('look') === 'night') night = true;
+  if (shot && options.get('look') === 'snow') weather = 'snow';
+  if (shot || showpiece) configureWeather();
   element('journey').textContent = [service.stops[0], service.stops.at(-1)!].map(station => station.name).join(' → ');
   element('line').textContent = data.service;
   const departure = data.timetable ? timetableSeconds(data.timetable.departure) : 0;
@@ -226,7 +270,7 @@ async function run(): Promise<void> {
     }
     let next = target && mapStreams.get(target);
     if (target && !next) {
-      next = new SceneryStream(target.tiles, maps, new Rail(target.rail), target.spans, sceneryError, sceneryChanged);
+      next = new SceneryStream(target.tiles, { ...maps, polished: target.ref === 'R40' }, new Rail(target.rail), target.spans, sceneryError, sceneryChanged);
       mapStreams.set(target, next);
     }
     if (mapStream !== next) {
@@ -252,11 +296,13 @@ async function run(): Promise<void> {
   function configureWeather(): void {
     dirty = true;
     atmosphere.set(night, weather);
+    lighting?.set(night, weather);
+    service.surface = weather;
     scene.environment = night ? nightReflection : dayReflection;
-    scene.environmentIntensity = night ? 0.38 : 0.55;
+    scene.environmentIntensity = showpiece ? (night ? .47 : .73) : (night ? .38 : .55);
     scenery.setWeather(weather);
     scenery.setNight(night);
-    element('day').textContent = night ? 'Night' : 'Day';
+    element('day').textContent = night ? (showpiece ? 'Blue hour' : 'Night') : (showpiece ? 'Golden hour' : 'Day');
     element('weather').textContent = weather[0].toUpperCase() + weather.slice(1);
   }
 
@@ -272,27 +318,26 @@ async function run(): Promise<void> {
   }
 
   function drive(control: 'throttle' | 'brake', increment: number): void {
-    service.automatic = false;
-    service.controls[control] = Math.max(0, Math.min(1, Math.round((service.controls[control] + increment) * 5) / 5));
+    service.adjustNotch(control, increment);
   }
 
-  function horn(): void {
-    audio ??= new AudioContext();
-    void audio.resume();
-    const envelope = audio.createGain();
-    const start = audio.currentTime;
-    envelope.gain.setValueAtTime(0.001, start);
-    envelope.gain.exponentialRampToValueAtTime(0.09, start + 0.06);
-    envelope.gain.exponentialRampToValueAtTime(0.001, start + 0.74);
-    envelope.connect(audio.destination);
-    for (const frequency of [244, 318]) {
-      const oscillator = audio.createOscillator();
-      oscillator.type = 'triangle';
-      oscillator.frequency.value = frequency;
-      oscillator.connect(envelope);
-      oscillator.start(start);
-      oscillator.stop(start + 0.76);
-    }
+  function restart(practice: boolean): void {
+    if (!showpiece) return;
+    service = new Service(data, rail, { driving: true, training: practice });
+    service.surface = weather;
+    traffic = network?.traffic?.length ? new Traffic(data, rail, service, network.traffic) : null;
+    for (const consist of trafficModels.values()) for (const coach of consist) scene.remove(coach.group);
+    trafficModels.clear();
+    tutorial = practice ? new DrivingTutorial() : undefined;
+    element('brake-cue').hidden = practice;
+    element('route-advice').hidden = practice;
+    panel?.reset(tutorial);
+    temporaryNotice = '';
+    noticeUntil = 0;
+    if (paused) actions.pause();
+    switchView('cab');
+    cameras.relocate();
+    dirty = true;
   }
 
   const actions: Record<string, () => void> = {
@@ -321,18 +366,31 @@ async function run(): Promise<void> {
     'less-power': () => drive('throttle', -0.2),
     'more-brake': () => drive('brake', 0.2),
     'less-brake': () => drive('brake', -0.2),
-    doors: () => { if (!service.toggleDoors()) showNotice('Stop the train before opening the doors.'); },
-    horn,
+    doors: () => {
+      if (!service.toggleDoors()) showNotice(service.boardingRemaining > 0 ? 'Boarding is still in progress.'
+        : showpiece ? 'Stop at the platform marker before opening the doors.' : 'Stop the train before opening the doors.');
+    },
+    horn: () => audio.horn(),
+    tutorial: () => restart(true),
+    retry: () => restart(false),
+    'hide-result': () => { element('trip-result').hidden = true; },
+    mute: () => {
+      const button = element('mute');
+      const muted = button.getAttribute('aria-pressed') !== 'true';
+      button.setAttribute('aria-pressed', String(muted));
+      button.textContent = muted ? 'Muted' : 'Sound';
+      audio.setMuted(muted);
+    },
     auto: () => { service.automatic = !service.automatic; },
   };
 
   const keys: Record<string, string> = {
     '1': 'cab-view', '2': 'chase-view', '3': 'map-view',
     w: 'more-power', s: 'less-power', e: 'more-brake', q: 'less-brake',
-    d: 'doors', h: 'horn', a: 'auto', t: 'compression', p: 'pause',
+    d: 'doors', h: 'horn', a: 'auto', t: 'compression', p: 'pause', r: 'retry', l: 'tutorial',
   };
   for (const [id, action] of Object.entries(actions)) {
-    element(id).addEventListener('click', () => { dirty = true; action(); });
+    element(id).addEventListener('click', () => { audio.unlock(); dirty = true; action(); });
   }
   window.addEventListener('keydown', event => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.target instanceof HTMLSelectElement) return;
@@ -340,6 +398,7 @@ async function run(): Promise<void> {
     if (!id) return;
     event.preventDefault();
     if (event.repeat && !['more-power', 'less-power', 'more-brake', 'less-brake'].includes(id)) return;
+    audio.unlock();
     dirty = true;
     actions[id]();
   });
@@ -373,21 +432,100 @@ async function run(): Promise<void> {
   const clock = element('clock');
   const throttle = element<HTMLMeterElement>('power');
   const brake = element<HTMLMeterElement>('brake');
+  const separateClock = showpiece && !shot;
   let previous = performance.now();
   let nextHud = previous;
+  let nextStatus = previous;
   let previousReversals = service.reversals;
+
+  function advance(simulationTime: number): void {
+    if (paused) return;
+    const state = service.tick(simulationTime);
+    traffic?.update(state.elapsed, simulationTime);
+    tutorial?.update(service.controls, state, cameras.view);
+  }
+
+  function updateHud(now: number): void {
+    const chainage = service.chainage();
+    const { state } = service;
+    const station = service.nextStop;
+    const remaining = station ? station.stopDistance - chainage : 0;
+    speed.textContent = String(Math.round(state.speed * 3.6));
+    limit.textContent = String(service.trackSpan.speedLimit ?? '—');
+    limit.dataset.speeding = String(service.speeding);
+    const authority = service.authority;
+    let upcoming = '';
+    for (const feature of mappedSignals) {
+      const chainage = feature.chainage!;
+      if (Math.abs(chainage - service.chainage()) > 2100 && chainage !== authority.boundary) continue;
+      const direction = feature.facesService ? 1 : -1;
+      const arriving = chainage === authority.boundary && feature.facesService;
+      const displayed = service.blocks.aspect(arriving ? 'player' : 'next-train', chainage - direction * 0.01, direction);
+      scenery.setSignal(displayed.aspect, feature.osmId);
+      if (chainage === authority.boundary && feature.facesService) {
+        const label = feature.tags.ref ?? 'Signal';
+        upcoming = `${label} · ${authority.aspect} · ${Math.max(0, Math.round(chainage - service.chainage()))} m`;
+      }
+    }
+    signal.textContent = showpiece ? '' : upcoming;
+    panel?.update(service, weather, tutorial);
+    signal.dataset.aspect = authority.aspect;
+    const arrivalPlan = data.timetable?.calls?.[service.nextIndex]?.arrival ?? data.timetable?.arrival;
+    const planned = arrivalPlan && station ? ` · ${arrivalPlan.slice(0, 5)}` : '';
+    nextStop.textContent = station ? `${station.name} · ${Math.max(0, Math.round(remaining))} m${planned}` : 'Service complete';
+    const seconds = Math.floor(state.elapsed) + departure;
+    clock.textContent = new Date(seconds * 1000).toISOString().slice(11, 19);
+    throttle.value = service.controls.throttle;
+    brake.value = service.controls.brake;
+    if (showpiece) {
+      element('power-notch').textContent = String(Math.round(5 * service.controls.throttle));
+      element('brake-notch').textContent = String(Math.round(5 * service.controls.brake));
+    }
+    element('doors').setAttribute('aria-pressed', String(service.controls.doorsOpen));
+    element('auto').setAttribute('aria-pressed', String(service.automatic));
+    const timing = service.arrivalTime === null ? 0 : Math.round(departure + service.arrivalTime - arrival);
+    const schedule = data.timetable
+      ? timing === 0 ? ' · on time' : ` · ${Math.abs(timing)} s ${timing < 0 ? 'early' : 'late'}`
+      : '';
+    const score = showpiece ? service.finalResult?.score ?? null : data.timetable ? service.score(arrival - departure) : null;
+    const result = score === null ? 'Service complete' : `Score ${score}/100`;
+    notice.textContent = now < noticeUntil ? temporaryNotice
+      : !station ? `${result} · ${Math.abs(service.stoppingError ?? 0).toFixed(1)} m stopping error${schedule}`
+        : remaining < -7 ? (showpiece ? 'Stop missed · R to retry' : 'Stop missed') : service.speeding ? 'Above line speed' : '';
+  }
+
+  if (separateClock) {
+    let lastTick = performance.now();
+    window.setInterval(() => {
+      const now = performance.now();
+      const seconds = Math.min(.35, (now - lastTick) / 1000);
+      lastTick = now;
+      if (world.dataset.stage !== 'running') return;
+      advance(seconds * timeScale);
+      const { state, trackSpan } = service;
+      audio.update({ ...service.effort, doorsOpen: service.controls.doorsOpen, brakeCommand: service.controls.brake,
+        speed: state.speed, distance: state.distance, weather, tunnel: trackSpan.tunnel, bridge: trackSpan.bridge,
+        lakeside: activeStream?.lakesideAt(service.chainage()) ?? 0, view: cameras.view, paused, timeScale });
+      if (now >= nextHud) {
+        updateHud(now);
+        nextHud = now + 100;
+      }
+    }, 32);
+  }
+
   function frame(now: number): void {
     const frameStart = audit ? performance.now() : 0;
     if (audit && !paused) performance.mark('station-frame-start');
-    const elapsed = Math.min(0.1, Math.max(0, (now - previous) / 1000));
+    const wallTime = Math.max(0, (now - previous) / 1000);
+    const elapsed = Math.min(.1, wallTime);
     previous = now;
     if (paused && !dirty && !cameras.needsUpdate) {
       requestAnimationFrame(frame);
       return;
     }
     dirty = false;
-    const state = paused ? service.state : service.tick(elapsed * timeScale);
-    if (!paused) traffic?.update(state.elapsed, elapsed * timeScale);
+    if (!separateClock) advance(elapsed * timeScale);
+    const state = service.state;
     markPhase('station-simulation-end');
     const chainage = service.chainage();
     if (service.reversals !== previousReversals) {
@@ -395,14 +533,31 @@ async function run(): Promise<void> {
       previousReversals = service.reversals;
     }
     place(cab.group, chainage);
-    const inTunnel = service.trackSpan.tunnel;
-    const visual = { ...service.controls, speed: state.speed, night: night || inTunnel, deltaSeconds: elapsed };
+    const inTunnel = shot ? data.spans.some(span => span.tunnel && span.start <= shot.distance && span.end > shot.distance) : service.trackSpan.tunnel;
+    const visual = { ...service.controls, speed: state.speed, night: night || inTunnel, deltaSeconds: elapsed, weather };
+    marker?.update(rail, service.nextStop, chainage, !shot && !tutorial);
+    const shoreline = activeStream?.lakesideAt(chainage) ?? lakesideAt(chainage);
+    if (!shot && !separateClock) audio.update({ ...service.effort, doorsOpen: service.controls.doorsOpen, brakeCommand: service.controls.brake,
+      speed: state.speed, distance: state.distance, weather, tunnel: inTunnel, bridge: service.trackSpan.bridge,
+      lakeside: shoreline, view: cameras.view, paused, timeScale });
     cab.group.visible = cameras.view === 'cab';
     if (cab.group.visible) {
       cab.update(visual);
       cab.group.updateMatrixWorld();
     }
     placeConsist(coaches, service, elapsed, cameras.view === 'cab');
+    if (showpiece) {
+      const boarding = !shot && service.controls.doorsOpen && state.speed < .05;
+      if (boarding) {
+        let index = 0;
+        for (const { group } of coaches) {
+          for (const side of [-1, 1]) for (const offset of [-9.34, 9.42]) {
+            boardingSills[index++].set(side * 1.55, 1.03, offset).applyQuaternion(group.quaternion).add(group.position);
+          }
+        }
+      }
+      activeStream?.setBoardingDoors(boarding ? boardingSills : []);
+    }
     if (traffic) {
       const visible = new Set<string>();
       for (const movement of traffic.active) {
@@ -410,9 +565,10 @@ async function run(): Promise<void> {
         visible.add(movement.id);
         let consist = trafficModels.get(movement.id);
         if (!consist) {
-          consist = [createTrain(true, steel), createTrain(false, steel), createTrain(true, steel)];
+          consist = [createTrain(true, steel, showpiece), createTrain(false, steel, showpiece), createTrain(true, steel, showpiece)];
           trafficModels.set(movement.id, consist);
           scene.add(...consist.map(coach => coach.group));
+          for (const coach of consist) lighting?.addTree(coach.group);
         }
         placeConsist(consist, movement, elapsed, false);
       }
@@ -427,6 +583,7 @@ async function run(): Promise<void> {
     const tunnel = portal && rail.pose(chaseDistance);
     const transition = portal ? Math.min(1, (Math.min(chaseDistance - portal.start, portal.end - chaseDistance) + 18) / 18) : 0;
     const weight = transition * transition * (3 - 2 * transition);
+    cameras.motion(state.speed, chainage, state.acceleration, paused ? 0 : elapsed);
     cameras.update(cab.group, cab.eye, elapsed, heightAt, tunnel && { ...tunnel, weight });
     if (overview) {
       const height = Math.max(0, cameras.camera.position.y - cab.group.position.y);
@@ -443,56 +600,23 @@ async function run(): Promise<void> {
     scenery.update(visualTime, cameras.camera.position, chainage, cameras.mapFocus);
     updateMapScenery(visualTime, cameras.camera.position, cameras.mapFocus);
     markPhase('station-render-start');
-    renderer.render(scene, cameras.camera);
+    if (lighting) {
+      for (const root of scenery.group.children) lighting.addTree(root);
+      renderer.info.reset();
+      lighting.render(renderer, cab.group.position, shot ? .1 : visualTime, inTunnel && cameras.view === 'cab', shoreline, waterReflection);
+    } else renderer.render(scene, cameras.camera);
     markPhase('station-render-end');
-    if (now >= nextHud || paused) {
-      if (audit) {
-        world.dataset.drawCalls = String(renderer.info.render.calls);
-        world.dataset.triangles = String(renderer.info.render.triangles);
-      }
+    if (now >= nextStatus || paused) {
       world.dataset.stage = 'running';
       if (cameras.settled) world.dataset.view = cameras.view;
+      world.dataset.drawCalls = String(renderer.info.render.calls);
+      world.dataset.triangles = String(renderer.info.render.triangles);
       world.dataset.chainage = chainage.toFixed(2);
       world.dataset.structure = service.trackSpan.tunnel ? 'tunnel' : service.trackSpan.bridge ? 'bridge' : 'open';
-      const station = service.nextStop;
-      const remaining = station ? station.stopDistance - chainage : 0;
-      speed.textContent = String(Math.round(state.speed * 3.6));
-      limit.textContent = String(service.trackSpan.speedLimit ?? '—');
-      limit.dataset.speeding = String(service.speeding);
-      const authority = service.authority;
-      let upcoming = '';
-      for (const feature of mappedSignals) {
-        const chainage = feature.chainage!;
-        if (Math.abs(chainage - service.chainage()) > 2100 && chainage !== authority.boundary) continue;
-        const direction = feature.facesService ? 1 : -1;
-        const arriving = chainage === authority.boundary && feature.facesService;
-        const displayed = service.blocks.aspect(arriving ? 'player' : 'next-train', chainage - direction * 0.01, direction);
-        scenery.setSignal(displayed.aspect, feature.osmId);
-        if (chainage === authority.boundary && feature.facesService) {
-          const label = feature.tags.ref ?? 'Signal';
-          upcoming = `${label} · ${authority.aspect} · ${Math.max(0, Math.round(chainage - service.chainage()))} m`;
-        }
-      }
-      signal.textContent = upcoming;
-      signal.dataset.aspect = authority.aspect;
-      const arrivalPlan = data.timetable?.calls?.[service.nextIndex]?.arrival ?? data.timetable?.arrival;
-      const planned = arrivalPlan && station ? ` · ${arrivalPlan.slice(0, 5)}` : '';
-      nextStop.textContent = station ? `${station.name} · ${Math.max(0, Math.round(remaining))} m${planned}` : 'Service complete';
-      const seconds = Math.floor(state.elapsed) + departure;
-      clock.textContent = new Date(seconds * 1000).toISOString().slice(11, 19);
-      throttle.value = service.controls.throttle;
-      brake.value = service.controls.brake;
-      element('doors').setAttribute('aria-pressed', String(service.controls.doorsOpen));
-      element('auto').setAttribute('aria-pressed', String(service.automatic));
-      const timing = service.arrivalTime === null ? 0 : Math.round(departure + service.arrivalTime - arrival);
-      const schedule = data.timetable
-        ? timing === 0 ? ' · on time' : ` · ${Math.abs(timing)} s ${timing < 0 ? 'early' : 'late'}`
-        : '';
-      const score = data.timetable ? service.score(arrival - departure) : null;
-      const result = score === null ? 'Service complete' : `Score ${score}/100`;
-      notice.textContent = now < noticeUntil ? temporaryNotice
-        : !station ? `${result} · ${Math.abs(service.stoppingError ?? 0).toFixed(1)} m stopping error${schedule}`
-          : remaining < -7 ? 'Stop missed' : service.speeding ? 'Above line speed' : '';
+      nextStatus = now + 100;
+    }
+    if (!separateClock && (now >= nextHud || paused)) {
+      updateHud(now);
       nextHud = now + 100;
     }
     if (audit && !paused) {
@@ -509,6 +633,7 @@ async function run(): Promise<void> {
 }
 
 run().catch((error: unknown) => {
+  element('world').dataset.stage = 'failed';
   element('notice').textContent = error instanceof Error ? error.message : 'The simulator failed to start.';
   console.error(error);
 });

@@ -1701,8 +1701,8 @@ function addWater(group: Group, data: WorldData, surface: MeshStandardMaterial, 
     let faces = indices;
     const colors: number[] = [];
     if (polished) {
-      const shore = new Color(0x97bab1);
-      const deep = new Color(0x526d82);
+      const shore = new Color(0x84a39e);
+      const deep = new Color(0x456379);
       const tint = new Color();
       const banks = [outline, ...holes];
       for (let index = 0; index < rings.length; index++) colors.push(shore.r, shore.g, shore.b);
@@ -2309,7 +2309,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   windows.emissive.setHex(0xffb75b);
   const fixtures = material(0xf0d2a4, 0.57);
   fixtures.emissive.setHex(0xffc581);
-  const water = material(polished ? 0x9bb1b5 : 0x365762, 0.19, 0.05);
+  const water = material(polished ? 0x819ca9 : 0x365762, 0.19, 0.05);
   water.side = DoubleSide;
   water.vertexColors = polished;
   water.normalMap = waterNormals();

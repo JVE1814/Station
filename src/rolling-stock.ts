@@ -9,14 +9,19 @@ import {
   Color,
   ConeGeometry,
   CylinderGeometry,
+  DataTexture,
   DoubleSide,
   DynamicDrawUsage,
   FrontSide,
   Group,
   InstancedMesh,
+  LatheGeometry,
+  LinearFilter,
+  LinearMipmapLinearFilter,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
   PlaneGeometry,
   PointLight,
@@ -26,6 +31,7 @@ import {
   Sprite,
   SpriteMaterial,
   SRGBColorSpace,
+  Vector2,
   Vector3,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -42,6 +48,7 @@ export interface TrainVisualState {
   headlights?: boolean;
   deltaSeconds?: number;
   doorSide?: -1 | 1;
+  weather?: 'clear' | 'rain' | 'snow';
 }
 
 interface Surface {
@@ -129,7 +136,7 @@ function batchRigidParts(group: Group) {
     const geometries = batch.map((part) => {
       part.updateMatrix();
       const geometry = part.geometry.clone().applyMatrix4(part.matrix);
-      if (!part.material.map && !part.material.bumpMap) geometry.deleteAttribute('uv');
+      if (!part.material.map && !part.material.bumpMap && !part.material.emissiveMap) geometry.deleteAttribute('uv');
       return geometry;
     });
     const geometry = mergeGeometries(geometries);
@@ -211,7 +218,7 @@ function rimProfile(width: number, base: number, shoulder: number, height: numbe
   ];
 }
 
-function shell(group: Group, materials: MeshStandardMaterial[], leading: boolean) {
+function shell(group: Group, materials: MeshStandardMaterial[], leading: boolean, showpiece: boolean) {
   const geometry = new BufferGeometry();
   const rings = leading
     ? [
@@ -224,6 +231,15 @@ function shell(group: Group, materials: MeshStandardMaterial[], leading: boolean
     : [rimProfile(1.47, 0.91, 2.89, 3.9, -11.78), rimProfile(1.49, 0.89, 2.89, 3.98, -11.35)];
   rings.push(rimProfile(1.49, 0.89, 2.89, 3.98, 11.45), rimProfile(1.43, 0.91, 2.89, 3.90, 11.78));
   geometry.setAttribute('position', new BufferAttribute(new Float32Array(rings.flat(2)), 3));
+  if (showpiece) {
+    const uv = rings.flatMap(ring => ring.flatMap(([, height, z]) => [z / 3.5, height / 2.1]));
+    const livery = rings.flatMap(ring => ring.flatMap(([x, height]) => {
+      const roof = Math.max(0, (height - 3.48) / 0.50) * Math.min(1, 1.72 - Math.abs(x));
+      return [1 - 0.64 * roof, 1 - 0.30 * roof, 1 - 0.17 * roof];
+    }));
+    geometry.setAttribute('uv', new BufferAttribute(new Float32Array(uv), 2));
+    geometry.setAttribute('color', new BufferAttribute(new Float32Array(livery), 3));
+  }
 
   const partitions: number[][] = [[], [], []];
   for (let ring = 0; ring < rings.length - 1; ring++) {
@@ -343,6 +359,7 @@ function slidingDoors(group: Group, materials: ReturnType<typeof makeTrainMateri
   }
   group.add(...parts);
   return (state: TrainVisualState) => {
+    leafBodies.material.roughness = materials.siding.roughness;
     const fraction = 1 - Math.exp(-5.65 * (state.deltaSeconds ?? (1 / 60)));
     const leftTarget = Number(state.doorsOpen && state.doorSide !== 1);
     const rightTarget = Number(state.doorsOpen && state.doorSide !== -1);
@@ -355,11 +372,58 @@ function slidingDoors(group: Group, materials: ReturnType<typeof makeTrainMateri
   };
 }
 
+const windowVariants = 4;
+let passengerInterior: DataTexture | undefined;
+
+function interiorAtlas() {
+  if (passengerInterior) return passengerInterior;
+  const cell = 64;
+  const width = windowVariants * cell;
+  const pixels = new Uint8Array(width * cell * 4);
+  const exposureLevels = [0.85, 0.96, 0.62, 0.77];
+  for (let row = 0; row < cell; row++) {
+    const y = row / cell;
+    for (let column = 0; column < width; column++) {
+      const variant = Math.floor(column / cell);
+      const x = (column % cell) / cell;
+      const sideWall = Math.min(1, Math.min(x, 1 - x) * 7);
+      const seatLeft = Math.abs(x - 0.22 - variant * 0.014) < 0.13 && y < 0.52 + 0.05 * Math.cos(18 * x);
+      const seatRight = Math.abs(x - 0.70) < 0.13 && y < 0.42 + 0.06 * Math.sin(19 * x);
+      const headlining = y > 0.80;
+      const strip = y > 0.86 && y < 0.93 && sideWall > 0.5;
+      const seam = Math.abs(x - 0.49) < 0.019;
+      const exposure = exposureLevels[variant] * (strip ? 1 : headlining ? 0.65
+        : seatLeft || seatRight ? 0.23 : seam ? 0.32 : 0.48) * (0.76 + 0.24 * sideWall);
+      const position = (row * width + column) * 4;
+      pixels[position] = exposure * 255;
+      pixels[position + 1] = exposure * 228;
+      pixels[position + 2] = exposure * 196;
+      pixels[position + 3] = 255;
+    }
+  }
+  passengerInterior = new DataTexture(pixels, width, cell);
+  passengerInterior.colorSpace = SRGBColorSpace;
+  passengerInterior.generateMipmaps = true;
+  passengerInterior.minFilter = LinearMipmapLinearFilter;
+  passengerInterior.magFilter = LinearFilter;
+  passengerInterior.needsUpdate = true;
+  return passengerInterior;
+}
+
+function windowTextureSet(geometry: BufferGeometry, variant: number) {
+  const uv = geometry.getAttribute('uv');
+  for (let point = 0; point < uv.count; point++) {
+    const inset = 0.037 + uv.getX(point) * 0.926;
+    uv.setX(point, (inset + variant) / windowVariants);
+  }
+}
+
 function fitExtDetails(
   body: Group,
   materials: ReturnType<typeof makeTrainMaterials>,
   leading: boolean,
   windows: MeshStandardMaterial,
+  showpiece: boolean,
 ) {
   const { trim, underframe, metal, reflector, rubber } = materials;
   for (const side of [-1, 1]) {
@@ -367,15 +431,27 @@ function fitExtDetails(
     box(body, reflector, [0.032, 0.025, 20.3], [side * 1.5, 1.66, 0.73]);
     box(body, trim, [0.026, 0.115, 21.0], [side * 1.488, 1.08, 0.45]);
 
-    for (const z of [-7.73, -6.03, -4.32, -2.61, -0.90, 0.80, 2.51, 4.22, 5.93, 7.65]) {
+    for (const [index, z] of [-7.73, -6.03, -4.32, -2.61, -0.90, 0.80, 2.51, 4.22, 5.93, 7.65].entries()) {
       box(body, rubber, [0.045, 0.704, 1.41], [side * 1.504, 2.50, z]);
-      box(body, windows, [0.052, 0.626, 1.32], [side * 1.513, 2.51, z]);
+      const window = box(body, windows, [0.052, 0.626, 1.32], [side * 1.513, 2.51, z]);
+      if (showpiece) windowTextureSet(window.geometry, (index * 3 + (side === 1 ? 1 : 0)) % windowVariants);
       box(body, trim, [0.06, 0.62, 0.043], [side * 1.518, 2.51, z + 0.22]);
+    }
+    if (showpiece) {
+      box(body, metal, [0.047, 0.031, 20.3], [side * 1.514, 2.107, 0.73]);
+      box(body, underframe, [0.040, 0.049, 21.0], [side * 1.50, 1.239, 0.45]);
+      for (const z of [-7.92, -4.53, -1.10, 2.33, 5.73, 7.44]) {
+        box(body, trim, [0.015, 0.74, 0.013], [side * 1.496, 1.57, z]);
+      }
     }
 
     for (const doorway of [-9.34, 9.42]) {
       box(body, rubber, [0.060, 1.93, 1.59], [side * 1.498, 2.00, doorway]);
       box(body, metal, [0.09, 0.055, 1.72], [side * 1.53, 1.032, doorway]);
+      if (showpiece) {
+        box(body, reflector, [0.063, 0.025, 1.55], [side * 1.522, 1.066, doorway]);
+        box(body, trim, [0.06, 0.066, 0.63], [side * 1.505, 2.991, doorway]);
+      }
     }
 
     for (const z of [-5.2, 0.1, 4.75]) {
@@ -418,8 +494,11 @@ function fitExtDetails(
   }
 }
 
-function noseDetails(body: Group, trim: MeshStandardMaterial) {
-  const glaze = surface(0x182636, 0.16, 0.36);
+function noseDetails(body: Group, trim: MeshStandardMaterial, showpiece: boolean) {
+  const glaze = showpiece ? new MeshPhysicalMaterial({
+    color: 0x182b38, roughness: 0.13, metalness: 0.1, clearcoat: 0.82,
+    clearcoatRoughness: 0.1, envMapIntensity: 1.35,
+  }) : surface(0x182636, 0.16, 0.36);
   glaze.side = DoubleSide;
   const border = surface(0x13191c, 0.55, 0.09);
   border.side = DoubleSide;
@@ -471,7 +550,16 @@ function noseDetails(body: Group, trim: MeshStandardMaterial) {
   box(body, trim, [0.76, 0.30, 0.49], [0, 0.72, -11.81]);
   box(body, trim, [0.33, 0.26, 0.43], [0, 0.59, -12]);
   box(body, trim, [0.22, 0.17, 0.35], [0, 0.64, -12.26]);
-  const light = trainHeadlight(body);
+  if (showpiece) {
+    const bracket = surface(0x56616a, 0.35, 0.57);
+    for (const side of [-1, 1]) {
+      rod(body, bracket, 0.025, new Vector3(side * 0.48, 0.68, -11.95), new Vector3(side * 0.20, 0.64, -12.24));
+      cylinder(body, bracket, 0.040, 0.017, [side * 0.29, 1.035, -12.095], 12).rotateX(Math.PI / 2);
+      cylinder(body, bracket, 0.051, 0.021, [side * 0.75, 1.27, -12.005], 12).rotateX(Math.PI / 2);
+    }
+    box(body, bracket, [0.22, 0.042, 0.031], [0, 0.69, -12.40]);
+  }
+  const light = trainHeadlight(body, showpiece);
   return { lamp, light, halos };
 }
 
@@ -494,18 +582,19 @@ function headlampGlow() {
   return new SpriteMaterial({ map, blending: AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.74 });
 }
 
-function trainHeadlight(body: Group) {
-  const light = new SpotLight(0xffe5c4, 380, 125, 0.21, 0.68, 1.25);
+function trainHeadlight(body: Group, showpiece = false) {
+  const light = new SpotLight(0xffe5c4, showpiece ? 520 : 380, 125, 0.21, 0.68, 1.25);
   light.position.set(0, 1.64, -12.15);
   light.target.position.set(0, 0.70, -52);
   light.visible = false;
-  const length = 46;
+  const length = showpiece ? 52 : 46;
   const beam = new Mesh(
     new ConeGeometry(Math.tan(0.135) * length, length, 24, 1, true),
     new ShaderMaterial({
       blending: AdditiveBlending,
       depthWrite: false,
       transparent: true,
+      uniforms: { beamScattering: { value: showpiece ? 0.054 : 0.045 } },
       vertexShader: `
         varying vec3 viewNormal;
         varying vec3 viewRay;
@@ -518,6 +607,7 @@ function trainHeadlight(body: Group) {
           gl_Position = projectionMatrix * viewPosition;
         }`,
       fragmentShader: `
+        uniform float beamScattering;
         varying vec3 viewNormal;
         varying vec3 viewRay;
         varying float distanceAlong;
@@ -526,7 +616,7 @@ function trainHeadlight(body: Group) {
           float angle = smoothstep(0.04, 0.50, facing);
           float falloff = smoothstep(0.0, 0.09, distanceAlong)
             * (1.0 - smoothstep(0.18, 1.0, distanceAlong));
-          gl_FragColor = vec4(1.0, 0.77, 0.49, angle * falloff * 0.045);
+          gl_FragColor = vec4(1.0, 0.77, 0.49, angle * falloff * beamScattering);
           #include <colorspace_fragment>
         }`,
     }),
@@ -539,19 +629,52 @@ function trainHeadlight(body: Group) {
   return light;
 }
 
-export function createTrain(leading = true, brushedSteel?: Texture) {
+function snowOnPaint(material: MeshPhysicalMaterial) {
+  const snow = { value: 0 };
+  material.onBeforeCompile = shader => {
+    shader.uniforms.stockSnow = snow;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying float snowShelf;')
+      .replace('#include <begin_vertex>', `
+        #include <begin_vertex>
+        snowShelf = smoothstep(0.45, 0.92, normal.y) * smoothstep(3.40, 3.80, position.y);
+      `);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float snowShelf; uniform float stockSnow;')
+      .replace('#include <color_fragment>', `
+        #include <color_fragment>
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.69, 0.76, 0.81), snowShelf * stockSnow);
+      `)
+      .replace('#include <roughnessmap_fragment>', `
+        #include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, 0.85, snowShelf * stockSnow);
+      `);
+  };
+  return snow;
+}
+
+export function createTrain(leading = true, brushedSteel?: Texture, showpiece = false) {
   const group = new Group();
   const materials = makeTrainMaterials();
-  const { siding, paint, underframe, metal, trim } = materials;
+  const { siding, underframe, metal, trim } = materials;
+  const paintedShell = showpiece ? new MeshPhysicalMaterial({
+    color: 0x9f2527, roughness: 0.33, metalness: 0.22, clearcoat: 0.78,
+    clearcoatRoughness: 0.16, vertexColors: true,
+  }) : materials.paint;
+  const roofSnow = paintedShell instanceof MeshPhysicalMaterial ? snowOnPaint(paintedShell) : undefined;
   siding.map = brushedSteel ?? null;
   siding.bumpMap = brushedSteel ?? null;
   siding.bumpScale = 0.0015;
-  shell(group, [siding, paint, underframe], leading);
-  const windowMaterial = surface(0x263744, 0.14, 0.2);
-  windowMaterial.emissive.setHex(0xfda655);
-  fitExtDetails(group, materials, leading, windowMaterial);
+  shell(group, [siding, paintedShell, underframe], leading, showpiece);
+  const windowMaterial = showpiece ? surface(0x30414c, 0.11, 0.26) : surface(0x263744, 0.14, 0.2);
+  windowMaterial.emissive.setHex(showpiece ? 0xffbb75 : 0xfda655);
+  if (showpiece) {
+    windowMaterial.emissiveMap = interiorAtlas();
+    windowMaterial.envMapIntensity = 1.36;
+  }
+  fitExtDetails(group, materials, leading, windowMaterial, showpiece);
   const updateDoors = slidingDoors(group, materials);
-  const lights = leading ? noseDetails(group, trim) : undefined;
+  const lights = leading ? noseDetails(group, trim, showpiece) : undefined;
   const bogies: [Group, Group] = [
     buildBogie(group, underframe, metal, -8.3),
     buildBogie(group, underframe, metal, 8.3),
@@ -565,11 +688,17 @@ export function createTrain(leading = true, brushedSteel?: Texture) {
   });
   batchRigidShadow(group);
   function update(state: TrainVisualState) {
-    windowMaterial.emissiveIntensity = state.night ? 0.75 : 0.025;
+    windowMaterial.emissiveIntensity = state.night ? (showpiece ? 1.85 : 0.75) : 0.025;
+    if (paintedShell instanceof MeshPhysicalMaterial) {
+      paintedShell.roughness = state.weather === 'rain' ? 0.24 : 0.33;
+      paintedShell.clearcoatRoughness = state.weather === 'rain' ? 0.09 : 0.16;
+      siding.roughness = state.weather === 'rain' ? 0.28 : 0.35;
+    }
+    if (roofSnow) roofSnow.value = state.weather === 'snow' ? 0.92 : 0;
     if (lights) {
       const head = state.headlights !== false;
       lights.lamp.emissive.setHex(head ? 0xffd9a5 : 0xef382b);
-      lights.lamp.emissiveIntensity = state.night ? 3.8 : 0.62;
+      lights.lamp.emissiveIntensity = state.night ? (showpiece ? 4.8 : 3.8) : 0.62;
       lights.light.visible = state.night && head;
       for (const halo of lights.halos) {
         halo.material.color.setHex(head ? 0xffffff : 0xec422f);
@@ -647,11 +776,20 @@ function dial(
   x: number,
   y: number,
   scale: GaugeSpec,
+  showpiece: boolean,
 ) {
   const group = new Group();
   group.position.set(x, y, 0.016);
   desk.add(group);
-  cylinder(group, bezel, scale.scale, 0.051, [0, 0, 0], 40).rotation.x = Math.PI * 0.5;
+  if (showpiece) {
+    const profile = [[1, -0.025], [1, 0.006], [0.992, 0.022], [0.95, 0.033], [0.907, 0.026], [0.897, 0.013]]
+      .map(([radius, height]) => new Vector2(radius * scale.scale, height));
+    const ring = new Mesh(new LatheGeometry(profile, 40), bezel);
+    ring.rotation.x = Math.PI * 0.5;
+    group.add(ring);
+  } else {
+    cylinder(group, bezel, scale.scale, 0.051, [0, 0, 0], 40).rotation.x = Math.PI * 0.5;
+  }
   const canvas = makeDialTexture(scale);
   const face = surface(0xffffff, 0.46, 0.06);
   face.map = canvas;
@@ -673,10 +811,17 @@ function dial(
   };
 }
 
-function cabLabel(group: Group, label: string, x: number, z: number, width: number) {
+interface CabLabel {
+  label: string;
+  x: number;
+  z: number;
+  width: number;
+}
+
+function cabLabels(group: Group, labels: readonly CabLabel[]) {
   const canvas = document.createElement('canvas');
   canvas.width = 384;
-  canvas.height = 80;
+  canvas.height = 80 * labels.length;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas 2D is required to draw cab labels');
   ctx.fillStyle = '#22292f';
@@ -685,7 +830,7 @@ function cabLabel(group: Group, label: string, x: number, z: number, width: numb
   ctx.font = '600 48px system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(label, 192, 40);
+  labels.forEach(({ label }, index) => ctx.fillText(label, 192, 40 + index * 80));
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
   const material = surface(0xffffff, 0.8, 0);
@@ -693,10 +838,20 @@ function cabLabel(group: Group, label: string, x: number, z: number, width: numb
   material.emissive.setHex(0xffffff);
   material.emissiveMap = texture;
   material.emissiveIntensity = 0.15;
-  const mesh = new Mesh(new PlaneGeometry(width, width / 4.8), material);
-  mesh.position.set(x, 0.043, z);
-  mesh.rotation.x = -Math.PI * 0.5;
-  group.add(mesh);
+  for (const [row, { x, z, width }] of labels.entries()) {
+    const geometry = new PlaneGeometry(width, width / 4.8);
+    if (labels.length > 1) {
+      const uv = geometry.getAttribute('uv');
+      for (let vertex = 0; vertex < uv.count; vertex++) {
+        const v = 0.025 + uv.getY(vertex) * 0.95;
+        uv.setY(vertex, (labels.length - row - 1 + v) / labels.length);
+      }
+    }
+    const mesh = new Mesh(geometry, material);
+    mesh.position.set(x, 0.043, z);
+    mesh.rotation.x = -Math.PI * 0.5;
+    group.add(mesh);
+  }
 }
 
 function deskLever(group: Group, metal: MeshStandardMaterial, black: MeshStandardMaterial, x: number, z: number) {
@@ -713,9 +868,143 @@ function deskLever(group: Group, metal: MeshStandardMaterial, black: MeshStandar
   return assembly;
 }
 
-function makeCabGeometry(group: Group, grain?: Texture) {
+let windscreenMarks: DataTexture | undefined;
+
+function windscreenTexture() {
+  if (windscreenMarks) return windscreenMarks;
+  const width = 512;
+  const height = 256;
+  const pixels = new Uint8Array(width * height * 4);
+  let seed = 19_580_603;
+  const random = () => {
+    seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+    return seed / 4_294_967_296;
+  };
+  for (let row = 0; row < height; row++) {
+    const y = row / height;
+    for (let column = 0; column < width; column++) {
+      const x = column / width;
+      const edge = Math.max(Math.abs(2 * x - 1) ** 7, 0.81 * (1 - y) ** 11);
+      const frost = edge * (0.25 + 0.75 * random()) * (0.29 + 0.71 * Math.abs(Math.sin(x * 29 + y * 39)));
+      const index = (row * width + column) * 4;
+      pixels[index + 1] = 0.68 * 255 * frost;
+      pixels[index + 3] = 255;
+    }
+  }
+  for (let drop = 0; drop < 480; drop++) {
+    const x = Math.floor(random() * width);
+    const y = Math.floor(random() * height);
+    const radius = random() * 1.6 + 0.7;
+    const length = radius * (1.2 + random() * 4.5);
+    for (let dy = -Math.ceil(length); dy <= 2; dy++) {
+      const row = (y + dy + height) % height;
+      const tapered = radius * Math.max(0.25, 1 + Math.min(0, dy) / length);
+      for (let dx = -Math.ceil(tapered); dx <= Math.ceil(tapered); dx++) {
+        const column = (x + dx + width) % width;
+        const index = (row * width + column) * 4;
+        const shape = Math.max(0, 1 - (dx / (tapered + 0.5)) ** 2) * Math.max(0, 1 - Math.abs(dy) / length);
+        pixels[index] = Math.max(pixels[index], 167 * shape);
+        pixels[index + 2] = Math.max(pixels[index + 2], 255 * shape * Number(dy >= -1 && dx <= 0));
+      }
+    }
+  }
+  windscreenMarks = new DataTexture(pixels, width, height);
+  windscreenMarks.minFilter = LinearFilter;
+  windscreenMarks.magFilter = LinearFilter;
+  windscreenMarks.needsUpdate = true;
+  return windscreenMarks;
+}
+
+function cabWipers(group: Group, trim: MeshStandardMaterial, moving: boolean) {
+  const wipers = [];
+  for (const side of [-1, 1]) {
+    const position = new Vector3(side * 1.07, 2.22, -11.15);
+    const armEnd = new Vector3(side * 0.52, 2.63, -11.02);
+    const bladeStart = new Vector3(side * 0.40, 2.56, -11.047);
+    const bladeEnd = new Vector3(side * 0.79, 2.76, -10.974);
+    if (!moving) {
+      rod(group, trim, 0.009, position, armEnd);
+      rod(group, trim, 0.011, bladeStart, bladeEnd);
+      continue;
+    }
+    const pivot = new Group();
+    pivot.name = 'Cab windscreen wiper';
+    pivot.position.copy(position);
+    rod(pivot, trim, 0.009, new Vector3(), armEnd.sub(position));
+    rod(pivot, trim, 0.011, bladeStart.sub(position), bladeEnd.sub(position));
+    batchRigidParts(pivot);
+    group.add(pivot);
+    wipers.push({ side, pivot });
+  }
+  return wipers;
+}
+
+function wetWindscreen(group: Group, trim: MeshStandardMaterial) {
+  const wipers = cabWipers(group, trim, true);
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(new Float32Array([
+    -1.25, 2.20, -11.19, 1.25, 2.20, -11.19, 1.19, 3.52, -10.81, -1.19, 3.52, -10.81,
+  ]), 3));
+  geometry.setAttribute('uv', new BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2));
+  geometry.setIndex([0, 1, 2, 0, 2, 3]);
+  const material = new ShaderMaterial({
+    name: 'Windscreen rain and frost',
+    uniforms: {
+      marks: { value: windscreenTexture() },
+      time: { value: 0 },
+      rain: { value: 0 },
+      night: { value: 0 },
+    },
+    transparent: true,
+    depthWrite: false,
+    vertexShader: `
+      varying vec2 paneUv;
+      void main() {
+        paneUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      varying vec2 paneUv;
+      uniform sampler2D marks;
+      uniform float time;
+      uniform float rain;
+      uniform float night;
+      void main() {
+        vec2 slide = vec2(paneUv.x + rain * sin(paneUv.y * 16.0 + time * 1.9) * 0.002,
+          fract(paneUv.y + rain * time * 0.20));
+        vec3 pattern = texture2D(marks, slide).rgb;
+        float opacity = mix(pattern.g, pattern.r * 0.47 + pattern.b * 0.33, rain);
+        if (opacity < 0.011) discard;
+        vec3 frost = vec3(0.67, 0.82, 0.93);
+        vec3 drop = mix(vec3(0.22, 0.32, 0.42), vec3(0.68, 0.79, 0.85), pattern.b);
+        gl_FragColor = vec4(mix(frost, drop, rain) * mix(1.0, 0.56, night), opacity);
+        #include <colorspace_fragment>
+      }`,
+  });
+  const pane = new Mesh(geometry, material);
+  pane.name = 'Cab windscreen weather';
+  pane.visible = false;
+  pane.renderOrder = 12;
+  group.add(pane);
+  const normal = new Vector3(0, -0.38, 1.32).normalize();
+  let time = 0;
+  return (state: TrainVisualState) => {
+    const wet = state.weather === 'rain';
+    const snow = state.weather === 'snow';
+    pane.visible = wet || snow;
+    time += state.deltaSeconds ?? 1 / 60;
+    material.uniforms.time.value = time % 300;
+    material.uniforms.rain.value = Number(wet);
+    material.uniforms.night.value = Number(state.night);
+    const phase = wet || snow ? Math.min(1, (time % (wet ? 1.6 : 3.4)) / 1.18) : 0;
+    const sweep = 0.62 * Math.sin(Math.PI * phase) ** 2;
+    for (const { side, pivot } of wipers) pivot.quaternion.setFromAxisAngle(normal, -side * sweep);
+  };
+}
+
+function makeCabGeometry(group: Group, grain?: Texture, showpiece = false) {
   const charcoal = surface(0x2a3338, 0.88, 0.1);
-  const dashboard = surface(0x485156, 0.76, 0.09);
+  const dashboard = showpiece ? surface(0x434d53, 0.64, 0.09) : surface(0x485156, 0.76, 0.09);
   for (const material of [charcoal, dashboard]) {
     material.bumpMap = grain ?? null;
     material.bumpScale = 0.018;
@@ -740,11 +1029,18 @@ function makeCabGeometry(group: Group, grain?: Texture) {
     box(group, trim, [0.086, 0.11, 1.82], [side * 1.41, 2.21, -10.02]);
     box(group, charcoal, [0.42, 0.29, 0.55], [side * 1.22, 1.99, -10.94]);
     box(group, charcoal, [0.16, 0.18, 1.81], [side * 1.31, 3.49, -10.12]).rotation.z = side * 0.18;
+    if (showpiece) {
+      const gasket = roundedBox(group, rubber, [0.043, 1.39, 0.065], [side * 1.22, 2.87, -10.96], 0.016);
+      gasket.rotation.x = 0.27;
+      gasket.rotation.z = side * 0.035;
+      box(group, trim, [0.32, 0.043, 0.118], [side * 1.11, 2.213, -11.045]);
+      for (let slat = 0; slat < 6; slat++) {
+        box(group, dashboard, [0.011, 0.006, 0.082], [side * (1.00 + 0.042 * slat), 2.238, -11.045]);
+      }
+    }
   }
-  for (const side of [-1, 1]) {
-    rod(group, trim, 0.009, new Vector3(side * 1.07, 2.22, -11.15), new Vector3(side * 0.52, 2.63, -11.02));
-    rod(group, trim, 0.011, new Vector3(side * 0.40, 2.56, -11.047), new Vector3(side * 0.79, 2.76, -10.974));
-  }
+  const updateGlass = showpiece ? wetWindscreen(group, trim) : undefined;
+  if (!showpiece) cabWipers(group, trim, false);
 
   const dash = new Group();
   dash.position.set(0.15, 2.22, -10.76);
@@ -752,13 +1048,22 @@ function makeCabGeometry(group: Group, grain?: Texture) {
   group.add(dash);
   roundedBox(dash, rubber, [1.99, 0.405, 0.107], [0.03, 0.00, -0.04], 0.043);
   roundedBox(dash, dashboard, [1.92, 0.362, 0.049], [0.03, 0, -0.005], 0.021);
-  const speed = dial(dash, trim, accent, 0.25, 0, { max: 200, step: 25, label: 'km/h', scale: 0.169 });
-  const pressure = dial(dash, trim, accent, 0.66, -0.024, { max: 10, step: 2, label: 'bar', scale: 0.12 });
-  const power = dial(dash, trim, accent, -0.12, -0.018, { max: 100, step: 20, label: '%  traction', scale: 0.117 });
-  const reservoir = dial(dash, trim, accent, -0.45, -0.019, { max: 10, step: 2, label: 'bar', scale: 0.116 });
+  const speed = dial(dash, trim, accent, 0.25, 0, { max: 200, step: 25, label: 'km/h', scale: 0.169 }, showpiece);
+  const pressure = dial(dash, trim, accent, 0.66, -0.024, { max: 10, step: 2, label: 'bar', scale: 0.12 }, showpiece);
+  const power = dial(dash, trim, accent, -0.12, -0.018, { max: 100, step: 20, label: '%  traction', scale: 0.117 }, showpiece);
+  const reservoir = dial(dash, trim, accent, -0.45, -0.019, { max: 10, step: 2, label: 'bar', scale: 0.116 }, showpiece);
   for (const x of [-0.9, 0.96]) {
     for (const y of [-0.15, 0.15]) {
       cylinder(dash, brushed, 0.017, 0.019, [x, y, 0.027], 6).rotation.x = Math.PI / 2;
+    }
+  }
+  if (showpiece) {
+    box(dash, trim, [1.78, 0.010, 0.017], [0.03, -0.153, 0.022]);
+    box(dash, brushed, [1.78, 0.003, 0.012], [0.03, -0.158, 0.025]);
+    for (const x of [-0.69, 0.84]) {
+      for (let slot = 0; slot < 7; slot++) {
+        box(dash, trim, [0.078, 0.005, 0.012], [x, 0.078 - 0.022 * slot, 0.025]);
+      }
     }
   }
 
@@ -772,8 +1077,6 @@ function makeCabGeometry(group: Group, grain?: Texture) {
 
   const throttle = deskLever(controls, brushed, trim, 0.26, 0.03);
   const brake = deskLever(controls, brushed, trim, 0.76, 0.03);
-  cabLabel(controls, 'PÅDRAG', 0.26, 0.237, 0.143);
-  cabLabel(controls, 'BREMS', 0.76, 0.237, 0.135);
 
   const amber = surface(0x9d601f, 0.44, 0.12);
   amber.emissive.setHex(0xff8b1b);
@@ -785,9 +1088,15 @@ function makeCabGeometry(group: Group, grain?: Texture) {
     const knob = cylinder(controls, brushed, 0.033, 0.022, [x, 0.045, 0.118]);
     knob.castShadow = true;
   }
-  cabLabel(controls, 'DØRER', -0.90, 0, 0.12);
-  cabLabel(controls, 'LYS', -0.73, 0, 0.10);
-  cabLabel(controls, 'HORN', -0.56, 0, 0.12);
+  const labels = [
+    { label: 'PÅDRAG', x: 0.26, z: 0.237, width: 0.143 },
+    { label: 'BREMS', x: 0.76, z: 0.237, width: 0.135 },
+    { label: 'DØRER', x: -0.90, z: 0, width: 0.12 },
+    { label: 'LYS', x: -0.73, z: 0, width: 0.10 },
+    { label: 'HORN', x: -0.56, z: 0, width: 0.12 },
+  ];
+  if (showpiece) cabLabels(controls, labels);
+  else labels.forEach(label => cabLabels(controls, [label]));
 
   const fill = new PointLight(new Color(0xffdbac), 1.2, 2.9, 2);
   fill.position.set(0.38, 2.64, -9.90);
@@ -796,14 +1105,14 @@ function makeCabGeometry(group: Group, grain?: Texture) {
   batchRigidParts(controls);
   batchRigidParts(group);
   batchRigidShadow(group, [dash, controls]);
-  return { speed, pressure, power, reservoir, throttle, brake, amber, green, fill };
+  return { speed, pressure, power, reservoir, throttle, brake, amber, green, fill, updateGlass };
 }
 
-export function createCab(grain?: Texture) {
+export function createCab(grain?: Texture, showpiece = false) {
   const group = new Group();
   const eye = new Vector3(0.38, 2.70, -9.33);
-  const instruments = makeCabGeometry(group, grain);
-  const headlight = trainHeadlight(group);
+  const instruments = makeCabGeometry(group, grain, showpiece);
+  const headlight = trainHeadlight(group, showpiece);
   // Opaque cockpit depth prevents shading scenery hidden by the desk and window frames.
   group.traverse(object => {
     if (object instanceof Mesh && !Array.isArray(object.material) && !object.material.transparent) {
@@ -811,6 +1120,7 @@ export function createCab(grain?: Texture) {
     }
   });
   function update(state: TrainVisualState) {
+    instruments.updateGlass?.(state);
     instruments.speed(state.speed * 3.6, state.night);
     instruments.pressure(5 - 3.65 * state.brake, state.night);
     instruments.reservoir(8.1 - 0.18 * state.brake, state.night);

@@ -1,61 +1,62 @@
 # Station
 
-Station is a desktop browser train simulator. The service picker offers the full F4 to Bergen, F5 to Stavanger, F6 to Trondheim and the shorter R40 Seimsgrend–Bulken service. R40 is the default service and starts at 08:08 on the 18 November 2026 timetable.
-
-In Bird’s-eye view, **Fit network** shows all three intercity routes. Use the mouse wheel to zoom and drag to pan. On an intercity service, **Find station** brings the camera down to a mapped platform on any of the three lines while the train continues its service. **Follow train** in the network view returns the map to the running train.
+Station is an offline desktop browser train simulator. It opens on the R40 from Evanger through Seimsgrend and Bulken to Voss. The 08:01 departure uses a dated Entur timetable. The stop-to-stop journey is 17.44 km, with a baked corridor of about 17.6 km including the terminal approaches. The service picker also offers the original short R40 and the Bergen, Stavanger and Trondheim intercity lines.
 
 ## Run
 
-Install Node.js 22.18 or newer and run the development server.
+Use Node.js 22.18+ and a WebGL2 browser.
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Open the local address printed by Vite. Use a WebGL2-capable browser. Run these commands to serve the production build.
+Open the local address printed by Vite. Use `npm run build` and `npm run preview` for the static production build. Once installed, the build serves all route, terrain, texture, timetable and sound data locally.
 
-```sh
-npm run build
-npm run preview
-```
+## Drive the R40
 
-The static build serves its JavaScript, geometry and timetable locally. Gameplay needs no external network requests or service credentials.
-
-## Drive
+Press **L** for the interactive practice session. Follow its instructions to release the brake, power up, coast, stop and operate the doors. **R** returns you to Evanger and resets your score.
 
 | Input | Action |
 | --- | --- |
-| W / S | Increase / reduce traction |
-| E / Q | Apply / release the service brake |
-| D | Open or close the doors while stopped |
+| W / S | Increase / reduce power one notch |
+| E / Q | Apply / release the brake one notch |
+| D | Open or close doors at the platform |
 | H | Sound the horn |
-| 1 / 2 / 3 | Cab / chase / bird’s-eye |
-| Drag / scroll | Look or pan / zoom |
-| T | Cycle the time rate |
-| P | Pause or resume the game |
+| 1 / 2 / 3 | Cab / chase / Bird’s-eye |
+| Drag / scroll | Look, orbit or pan / zoom |
+| T | Cycle 1×, 2× and 5× simulation speed |
+| P | Pause or resume |
+| L / R | Practice / restart the service |
 | A | Toggle automatic driving |
 
-Start by releasing the brakes with Q, then apply power with W. Watch the speed limit and the distance to the next stop. Sustained speeding reduces the score. Brake to a standstill at the stopping marker and open the doors to register the stop. The buttons in the top bar switch time of day and weather.
+Release Brake 5 with Q before applying power. The lower-left guidance shows an approach speed and a suggested power or brake notch. The route panel previews the next signal and speed change. Stop beside the amber marker, open the doors, let passengers board, and close the doors before departing. Wet and snowy rail change traction and braking response. Result cards show stopping accuracy, timetable margin, passengers and score.
 
-## Architecture
+**Find station** in Bird’s-eye view jumps to a mapped platform. **Fit network** switches to the wider route map. **Sound** mutes the local simulation mix.
 
-- The Python baker resolves connected rail ways and stop positions from OSM service relations, projects them to a local metric grid, and derives a vertical profile from Copernicus DEM.
-- The browser keeps the active alignment and timetable in memory and streams nearby gzip scenery tiles. The tile bounds share one metric projection and the visible terrain has a single owner where tiles overlap. Three.js renders the infrastructure, scenery, original rolling stock and cab instruments.
-- Longitudinal dynamics run at 120 Hz and interpolate the pose at render time. The train samples the alignment separately at each bogie. Cab, chase and bird’s-eye cameras share the same train state.
-- The timetable is extracted from Entur GTFS. Same-direction scheduled trains share block occupancy with the player. F5 changes driving ends at Kristiansand. The baked world contains the original OSM identifiers and rail geometry used by the geographic checks.
+## Graphics
 
-## Rebuild data and verify
+| Preset | Treatment |
+| --- | --- |
+| Low | Physical sky and 1024² shadow cascades, with direct rendering |
+| High | 1536² cascades and an HDR pass for screen-space occlusion, haze and bloom |
+| Ultra | 2048² cascades, stronger occlusion and multisampled HDR rendering |
 
-For a data bake, install Python 3.12+, osmium-tool, GDAL with `gdalbuildvrt` and `gdalwarp`, and the Python requirements in an active virtual environment. The first data bake downloads the pinned 1.38 GB OSM snapshot and the Copernicus DEM tiles it needs into `.cache/`. `npm run data:pair` regenerates the R40 checkpoint alone. The full bake uses the committed dated Entur extracts and installs gzip scenery tiles, a service catalog and the route manifest.
+The R40 starts at golden hour. Use the daylight control for blue hour and the weather control for clear, rain and snow. High and Ultra reflect the visible shoreline in the nearest lake. The gallery command always captures at Ultra. [R40 hero comparisons](reference/r40/README.md)
+
+## Verify and rebuild
 
 ```sh
-python -m pip install -r scripts/requirements.txt
-npm run data
+npm run verify
+npm run capture:r40
 ```
 
-Run all automated checks with `npm run verify` or the station-pair checks with `npm run verify:pair`. The full run audits 169 scenery tiles and exercises accelerated service replays before browser verification. The verification runner reports each check separately. The browser check expects Chromium at `/usr/bin/chromium`; set `CHROMIUM_PATH` for a different installation. `npm run verify:browser -- --captures` writes 1080p captures to `evidence/`.
+Verification checks the pinned OSM geometry and Entur calls, real rendered clearance, fixed-step replays and browser behavior. The browser check measures p95 frame intervals on a hardware GPU at 1080p High. Without hardware graphics it reports calls and triangles. It expects Chromium at `/usr/bin/chromium`, with `CHROMIUM_PATH` as an override.
 
-On a software WebGL renderer the timing check uses Chromium’s renderer thread CPU clock as a proxy and reports wall frame intervals separately. A hardware renderer uses the wall frame intervals for the timing limit. Run `npm run verify -- --captures` to refresh the view captures during the full review.
+For baking, install Python 3.12+, osmium-tool, GDAL and `scripts/requirements.txt`. `npm run data:r40` refreshes the Evanger–Voss tiles. `npm run data` runs the complete offline data build. The browsers use the committed assets after a bake.
 
-The playable checkpoint and its side-by-side screenshots are indexed in [evidence](evidence/README.md). See [PROGRESS.md](PROGRESS.md) for review status and [ASSETS.md](ASSETS.md) for attribution.
+## Architecture and credits
+
+The renderer follows a metric OSM rail spline and streams tiled scenery. The driver model advances in fixed steps with interpolated presentation. Mapped block signals, rail grade, applied effort, local weather and door state feed the driving and synthesis systems. The three views share the same service.
+
+Route and feature data are from OpenStreetMap contributors. Timetables are from Entur. See [ASSETS.md](ASSETS.md) for elevation licenses, generated asset provenance and credits, [DECISIONS.md](DECISIONS.md) for implementation assumptions, and [PROGRESS.md](PROGRESS.md) for checkpoint results.

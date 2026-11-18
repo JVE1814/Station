@@ -143,5 +143,12 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - In the chase view, tree crowns now stay out of low-angle views through an eye-elevation test. The above-canopy representation remains available for steep overhead views. The targeted tests cover placement ownership, mapped exclusions, species tags, low-angle crown visibility and synchronized shadow motion.
 - Indexed polygon edges by scan rows. The new placement generated the same full tile layout in 0.60 s during the local Node check, down from 6.47 s before indexing. TypeScript, targeted lint and all three vegetation tests passed.
 
+## Lakeside chase and production integration
+
+- Captured the before frame at 8,709 m and used that exact frame as the GPT Image input. The same grounded camera, train pose and terrain are used for the Ultra render. Refined reflections, shading, clearcoat, wooded banks and the rail-side planting against the target before moving on to the other shots.
+- Integrated three graphics presets, physical daylight, blue hour, snow, cascaded shadows, post-processing, weatherable cab and train parts, the keyboard lesson and the simulation-driven sound mix. R40's fixed-step drive clock and HUD update independently of the camera render.
+- TypeScript, lint, the 47 JavaScript tests and the Python data tests passed in development. Chromium captured the original and new 1920 × 1080 chase frames. The first triptych was assembled from the preserved source PNGs.
+- The remaining Ultra frames, comparison assembly, full release verification, graphics workload report and independent reviews are in progress.
+
 - Graduated trackside tree height from maintained suckers to mature woodland. In the same lakeside scene, the tallest rooted tree within 14 m of rail fell from 17.56 m to 2.78 m, and the tallest within 26 m fell from 18.95 m to 5.01 m. The mapped forest footprint and shrub exclusions still apply.
 - Added autumn colour within the birch shader using leaf chroma before any instance tint. In the original cutout, the mask strongly selected 75% of the sampled opaque canopy pixels and selected zero of the 4,023 sampled bare-stem pixels. Pine and spruce bypass the autumn mask.

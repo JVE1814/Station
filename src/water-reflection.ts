@@ -107,14 +107,17 @@ export class WaterReflection {
           varying float vLakeHeight;
         `)
         .replace('#include <opaque_fragment>', `
-          if (lakeReflectivity > 0.0 && abs(vLakeHeight - lakePlane) <= 0.42 && vLakeReflection.w > 0.001) {
+          float planeBlend = 1.0 - smoothstep(0.6, 9.0, abs(vLakeHeight - lakePlane));
+          if (lakeReflectivity > 0.0 && planeBlend > 0.0 && vLakeReflection.w > 0.001) {
             vec2 planarUv = vLakeReflection.xy / vLakeReflection.w + normal.xy * 0.011;
             float edge = min(min(planarUv.x, planarUv.y), min(1.0 - planarUv.x, 1.0 - planarUv.y));
             float insideImage = smoothstep(0.015, 0.067, edge);
             float facing = clamp(abs(dot(normal, normalize(vViewPosition))), 0.0, 1.0);
             float fresnel = 0.24 + 0.64 * pow(1.0 - facing, 3.3);
             vec3 reflectedValley = texture2D(lakeMirror, clamp(planarUv, vec2(0.0), vec2(1.0))).rgb;
-            outgoingLight = mix(outgoingLight, reflectedValley, lakeReflectivity * fresnel * insideImage);
+            reflectedValley *= vec3(.63, .74, .83);
+            outgoingLight = mix(outgoingLight, reflectedValley,
+              lakeReflectivity * fresnel * insideImage * planeBlend);
           }
           #include <opaque_fragment>
         `);
@@ -135,7 +138,7 @@ export class WaterReflection {
     let best = Infinity;
     for (const surface of this.surfaces) {
       const height = this.eye.y - surface.level;
-      if (height < 0.20 || height > 220 || !surface.mesh.visible || !this.frustum.intersectsBox(surface.bounds)) continue;
+      if (height < 0.20 || height > 370 || !surface.mesh.visible || !this.frustum.intersectsBox(surface.bounds)) continue;
       this.groundEye.copy(this.eye).setY(surface.level);
       const horizontal = surface.bounds.distanceToPoint(this.groundEye);
       if (horizontal > 460) continue;

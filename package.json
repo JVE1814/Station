@@ -17,6 +17,8 @@
     "verify:pair": "npm run typecheck && npm run lint && npm test && npm run build && node scripts/verify-world.mjs && node scripts/verify-clearance.mjs && npm run verify:browser",
     "preview": "vite preview",
     "verify": "node scripts/verify.mjs",
+    "data:r40": "python3 scripts/bake_r40.py",
+    "capture:r40": "node scripts/capture-r40.mjs",
     "data:pair": "python3 scripts/bake_pair.py 18567357 432630619 5594658999 public/data/service.json --timetable data/r40-timetable.json",
     "drive:browser": "node scripts/drive-browser.mjs",
     "verify:network-browser": "node scripts/check-network-browser.mjs"

@@ -87,3 +87,33 @@ meter::-webkit-meter-optimum-value { background: #d4ad6a; }
 #route-picker, #map-station { border: 1px solid #657078; border-radius: 4px; padding: 4px; color: #f4f1e9; background: #172127; }
 #route-picker { margin-top: 9px; max-width: 100%; }
 #map-station { max-width: 146px; }
+
+.hero-capture #simulator > :not(#world) { display: none; }
+
+
+body.showpiece { color: #f7f1e3; }
+.showpiece .service-panel, .showpiece .speed-panel, .showpiece .controls-panel, .showpiece .group,
+.showpiece .notice, .showpiece .help, .driver-card { background: #111d25f5; border-color: #52616a; border-radius: 5px; }
+.showpiece #line { letter-spacing: .04em; font-weight: 650; }
+.showpiece #speed { font-weight: 650; }
+.showpiece .speed-panel { flex-wrap: wrap; max-width: 235px; }
+#brake-cue { width: 100%; color: #d5e4e8; font-size: 12px; padding-bottom: 3px; }
+#brake-cue[data-brake="true"] { color: #ffd79d; }
+#route-advice { display: grid; gap: 3px; margin-top: 10px; color: #c5d3db; font-size: 12px; }
+#route-advice[hidden] { display: none; }
+#grip { color: #b1c7cf; }
+#preview-signal[data-aspect="clear"] { color: #b4e2bf; }
+#preview-signal[data-aspect="approach"] { color: #ffd79d; }
+#preview-signal[data-aspect="stop"] { color: #ffa89f; }
+#quality { margin: 3px; padding: 3px 5px; color: #f7f1e3; background: #182931; border: 1px solid #657078; border-radius: 4px; }
+.driver-card { position: fixed; left: 24px; bottom: 150px; max-width: 292px; padding: 15px 18px; border: 1px solid #52616a; color: #f2efe3; }
+.driver-card h2 { margin: 0 0 6px; font-size: 16px; font-weight: 650; letter-spacing: -.01em;}
+.driver-card strong { display: block; font-size: 25px; color: #f3d6ab; margin-bottom: 6px; }
+.driver-card p { margin: 3px 0; }
+.driver-card small { display: block; margin-top: 8px; color: #c6d2d9; }
+.driver-card button { margin-top: 8px; border-color: #5a6970; }
+@media (max-width: 760px) {
+  .driver-card { left: 10px; bottom: 125px; }
+  .showpiece .auxiliary { flex-wrap: wrap; }
+}
+.showpiece .control output { min-width: 1ch; color: #f3d6ab; text-align: center; font-weight: 650; }

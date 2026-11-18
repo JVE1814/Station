@@ -9,6 +9,9 @@ interface ChaseTunnel {
 }
 
 export class Cameras {
+  private driveSpeed = 0;
+  private driveDistance = 0;
+  private driveSway = 0;
   readonly camera = new PerspectiveCamera(63, 1, 0.06, 18000);
   view: View = 'cab';
   private readonly destination = new Vector3();
@@ -30,7 +33,22 @@ export class Cameras {
   private cabYaw = 0;
   private cabPitch = -0.095;
   private initialized = false;
+  private grounded = false;
+  private lookLift = 0;
   private transition = 0;
+  private readonly movingCamera: boolean;
+
+  constructor(movingCamera = false) {
+    this.movingCamera = movingCamera;
+  }
+
+  motion(speed: number, distance: number, acceleration: number, elapsed: number): void {
+    if (!this.movingCamera) return;
+    const follow = 1 - Math.exp(-elapsed * 4.5);
+    this.driveSpeed += (speed - this.driveSpeed) * follow;
+    this.driveSway += (acceleration - this.driveSway) * follow;
+    this.driveDistance = distance;
+  }
 
   get settled(): boolean {
     return this.transition <= 0;
@@ -50,6 +68,14 @@ export class Cameras {
     this.previousPosition.copy(this.camera.position);
     this.previousOrientation.copy(this.camera.quaternion);
     this.transition = 0.72;
+  }
+
+  cut(lift = 0): void {
+    this.initialized = false;
+    this.transition = 0;
+    this.mapGround = undefined;
+    this.grounded = true;
+    this.lookLift = lift;
   }
 
   allowMapExtent(height: number): void {
@@ -97,12 +123,15 @@ export class Cameras {
     tunnel?: ChaseTunnel): void {
     if (this.view === 'cab') {
       this.destination.copy(eye).applyQuaternion(cab.quaternion).add(cab.position);
-      this.rotation.set(this.cabPitch, this.cabYaw, 0);
+      const moving = Math.min(1, this.driveSpeed / 18);
+      this.destination.y += moving * (.005 * Math.sin(this.driveDistance * 4.3) + .008 * Math.sin(this.driveDistance * 1.2));
+      this.rotation.set(this.cabPitch - this.driveSway * .012, this.cabYaw,
+        moving * .004 * Math.sin(this.driveDistance * .65));
       this.orientation.setFromEuler(this.rotation).premultiply(cab.quaternion);
     } else if (this.view === 'chase') {
       this.target.set(0, 2.0, -4).applyQuaternion(cab.quaternion).add(cab.position);
       this.offset.setFromSpherical(this.orbit).applyQuaternion(cab.quaternion);
-      this.destination.copy(this.target).add(this.offset);
+      this.destination.copy(this.target).addScaledVector(this.offset, 1 + Math.min(.16, this.driveSpeed * .005));
       if (tunnel) {
         const lateral = Math.sin(this.orbit.theta) * 1.85;
         const height = 2.3 + Math.cos(this.orbit.phi) * 0.8;
@@ -110,12 +139,16 @@ export class Cameras {
           .add(tunnel.position);
         this.destination.lerp(this.tunnelPosition, tunnel.weight);
       }
+      if ((this.movingCamera || this.grounded) && !tunnel) {
+        const ground = groundAt?.(this.destination.x, this.destination.z);
+        if (ground !== undefined) this.destination.y = Math.max(this.destination.y, ground + 1.7);
+      }
     } else {
       this.target.copy(this.mapAnchor ?? cab.position);
       this.target.x += this.mapOffset.x;
       this.target.z += this.mapOffset.z;
       const elevation = groundAt?.(this.target.x, this.target.z) ?? cab.position.y;
-      this.mapGround ??= this.target.y;
+      this.mapGround ??= this.initialized ? this.target.y : elevation;
       this.mapGround += (elevation - this.mapGround) * (1 - Math.exp(-elapsed * 8));
       this.mapGroundMoving = Math.abs(elevation - this.mapGround) > 0.1;
       this.target.y = this.mapGround;
@@ -124,6 +157,7 @@ export class Cameras {
       this.destination.z += this.mapOffset.y * 0.22;
     }
     if (this.view !== 'cab') {
+      this.target.y += this.lookLift;
       this.look.lookAt(this.destination, this.target, this.up);
       this.orientation.setFromRotationMatrix(this.look);
     }

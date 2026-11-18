@@ -1,6 +1,7 @@
 import { Group, Mesh, Texture } from 'three';
 import type { Vector3 } from 'three';
 import type { RouteTile } from './network';
+import { createLakesideProfile } from './audio';
 import { readWorldAsset } from './network';
 import { Rail } from './rail';
 import { createScenery } from './scenery';
@@ -56,6 +57,7 @@ function lineDistance(points: Vector3[], x: number, z: number): number {
 export class SceneryStream {
   readonly group = new Group();
   private readonly loaded = new Map<string, TileScene>();
+  private readonly shores = new Map<string, (chainage: number) => number>();
   private readonly terrain = new Map<string, TerrainData>();
   private readonly pending = new Map<string, AbortController>();
   private readonly signalAspects = new Map<number, SignalAspect>();
@@ -84,10 +86,10 @@ export class SceneryStream {
     }
   }
 
-  async ready(distance: number): Promise<void> {
-    const tile = this.tiles.find(candidate => distance >= candidate.start && distance <= candidate.end);
-    if (!tile) throw new Error('No scenery tile covers the departure marker');
-    await this.load(tile);
+  async ready(distance: number, range = 0): Promise<void> {
+    const tiles = this.tiles.filter(tile => distance + range >= tile.start && distance - range <= tile.end);
+    if (!tiles.length) throw new Error('No scenery tile covers the requested railway position');
+    await Promise.all(tiles.map(tile => this.load(tile)));
   }
 
   setWeather(weather: Weather): void {
@@ -123,6 +125,11 @@ export class SceneryStream {
     return undefined;
   }
 
+  lakesideAt(distance: number): number {
+    const tile = this.tiles.find(candidate => candidate.start <= distance && candidate.end >= distance);
+    return tile ? this.shores.get(tile.id)?.(distance - tile.start) ?? 0 : 0;
+  }
+
   coversMapFocus(focus: Vector3): boolean {
     return this.tiles.some(tile => covers(tile, focus.x, focus.z));
   }
@@ -151,6 +158,7 @@ export class SceneryStream {
         dispose(tile, this.sharedTextures);
         this.loaded.delete(id);
         this.terrain.delete(id);
+        this.shores.delete(id);
       }
     }
   }
@@ -194,7 +202,9 @@ export class SceneryStream {
         const [x, z] = feature.points[0];
         return placement.ownsCell(x, -z);
       });
-      const scenery = createScenery(world, new Rail(world.rail), this.maps, placement);
+      const rail = new Rail(world.rail);
+      const scenery = createScenery(world, rail, this.maps, placement);
+      if (this.maps.polished) this.shores.set(tile.id, createLakesideProfile(world, rail));
       scenery.setWeather(this.weather);
       scenery.setNight(this.night);
       scenery.setBoardingDoors(this.boardingDoors);

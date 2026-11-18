@@ -40,16 +40,17 @@ interface PublishedTimetable {
 }
 
 export async function loadNetworkRoute(ref: string): Promise<{ line: NetworkRoute; routes: NetworkRoute[] }> {
-  const network = await readWorldAsset<NetworkIndex>('data/network.json');
+  const base = ref === 'R40' ? 'data/r40/' : 'data/';
+  const network = await readWorldAsset<NetworkIndex>(base + 'network.json');
   const line = network.services.find(route => route.ref === ref);
   if (!line || !Array.isArray(line.tiles) || line.tiles.length === 0) {
     throw new Error(`The ${ref} service is unavailable in this build.`);
   }
-  const table = await readWorldAsset<PublishedTimetable[]>('data/timetables.json');
+  const table = await readWorldAsset<PublishedTimetable[]>(base + 'timetables.json');
   const record = table.find(candidate => candidate.line === ref);
   if (!record) throw new Error(`The dated timetable for ${ref} is missing.`);
   return {
-    line: { ...line, timetable: record.selected, traffic: record.journeys.filter(trip => trip.direction === 1) },
+    line: { ...line, tiles: line.tiles.map(tile => ({ ...tile, url: base + tile.url })), timetable: record.selected, traffic: record.journeys.filter(trip => trip.direction === 1) },
     routes: network.services,
   };
 }

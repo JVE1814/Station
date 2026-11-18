@@ -166,3 +166,9 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 
 - Closed the gap between jacket and trousers with an overlapping coat hem. Eight coat colors, alternating stances and sparse luggage distinguish waiting passengers. Walking keeps the existing path and footfall timing.
 - A before-and-after check on the published Seimsgrend–Bulken tile found all thirteen waiting positions identical and the same boarding counts at both stops under the same sill placement. TypeScript, targeted lint, and all three boarding tests passed.
+
+## R40 flowing water
+
+- Matched the pale-blue strip in the Evanger cab review to OSM river relation 4094053. A single percentile height lifted the clipped river fragment more than 8 m above the local Kartverket surface. At the bridge, adjacent tiles could draw relation 4094046 with water levels 0.60 m apart. The straight near bank itself follows a 36.98 m source segment.
+- Added reusable tessellation against the same world-aligned terrain cells and diagonals. It preserves the mapped outlines and holes and can use the terrain tile’s cell ownership. The mesh clears each coarse terrain triangle by 0.12 m.
+- Three tests, typecheck and targeted lint passed. The real Evanger source mesh reduced maximum clearance above bilinear DTM from 8.704 m to 0.810 m. Across six overlapping river and tile combinations, the highest remaining difference from bilinear sampling was 1.635 m on a steep bank cell. The new mesh does not change the rail, stations or baked terrain.

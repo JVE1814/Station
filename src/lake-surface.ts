@@ -26,7 +26,8 @@ function distanceToBank(mask: Uint8ClampedArray, width: number, height: number, 
       }
     }
   }
-  return Uint8Array.from(distances, distance => Math.round(Math.min(1, distance / 28) * 255));
+  const bank = Math.min(dx, dz) * .45;
+  return Uint8Array.from(distances, distance => Math.round(Math.min(1, Math.max(0, distance - bank) / 28) * 255));
 }
 
 export function createShorelineField(terrain: TerrainData, water: readonly WorldFeature[]) {

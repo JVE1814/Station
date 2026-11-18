@@ -122,7 +122,7 @@ export class WaterReflection {
             float edge = min(min(planarUv.x, planarUv.y), min(1.0 - planarUv.x, 1.0 - planarUv.y));
             float insideImage = smoothstep(0.015, 0.067, edge);
             float facing = clamp(abs(dot(normal, normalize(vViewPosition))), 0.0, 1.0);
-            float fresnel = 0.24 + 0.64 * pow(1.0 - facing, 3.3);
+            float fresnel = 0.07 + 0.83 * pow(1.0 - facing, 4.0);
             planarUv = clamp(planarUv, vec2(0.002), vec2(0.998));
             float spread = .00125 + .0013 * facing;
             vec3 reflectedValley = texture2D(lakeMirror, planarUv).rgb * .54

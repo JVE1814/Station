@@ -29,5 +29,5 @@
 - Frame the chase above the sampled ground. Use the same grounded camera and the same Kartverket terrain grids for the saved before build and the new renderer.
 - Advance R40 on a 32 ms timer that feeds the existing fixed-step integrator independently of rendering. Limit wall-clock catch-up to 350 ms per timer callback. Camera and particle motion retain their 100 ms cap.
 - Report calls and triangles on software WebGL. The 16.7 ms timing threshold applies to hardware High at 1920 × 1080.
-- Reframe the tunnel and lake overlook to show the opening and the train more clearly. Retake the corresponding before frames with the saved renderer and generate new paint-overs from those exact captures.
+- Reframe the bridge, tunnel and lake overlook to show the piers, portal and train more clearly. Retake the corresponding before frames with the saved renderer and generate new paint-overs from those exact captures.
 - For visual review, track the minimum individual category score across both reviewers and the fourteen renders. Use the same reviewers on subsequent image-only passes.

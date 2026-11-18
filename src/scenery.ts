@@ -2604,7 +2604,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
       bulb.visible = false;
       bulb.intensity = night ? 31 : 0;
     }
-    water.color.setHex(polished ? (night ? 0x63758b : 0x9bb1b5) : (night ? 0x20354b : 0x365762));
+    water.color.setHex(polished ? (night ? 0x63758b : 0x7996a7) : (night ? 0x20354b : 0x365762));
   };
   let waterTime = 0;
   const update = (seconds: number, camera: Vector3) => {

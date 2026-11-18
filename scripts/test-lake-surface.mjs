@@ -18,8 +18,8 @@ test('water depths fade from the source banks and island holes independently of 
   assert.equal(at(-86, 1), 0);
   assert.ok(at(17, 1) < at(30, 1));
   assert.ok(at(19, 1) < at(49, 1));
-  assert.equal(at(49, 1), 255);
-  assert.equal(at(-49, 1), 255);
+  assert.ok(at(49, 1) > 240);
+  assert.ok(at(-49, 1) > 240);
   const material = new MeshStandardMaterial();
   applyWaterBanks(material, field);
   const shader = { uniforms: {}, vertexShader: '#include <common>\n#include <worldpos_vertex>',

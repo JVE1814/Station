@@ -183,6 +183,7 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 
 - Found duplicate scenery tiles during a reused gallery sequence. The loader now shares in-flight requests and returns existing tiles instead of attaching a second copy. Capture checks the attached tile IDs at each camera position. Discarded that sequence and started a fresh set for scoring.
 - Lifted clear-day terrain in shade and softened highlights on the red paint. Added sparse summit snow to the distant material using source elevation and slope as well as the close terrain’s snow treatment.
+- Reframed the river bridge from the opposite bank to bring its two piers into view. Shallow water follows the mapped edge with a softer blend, and reflections now strengthen at grazing angles. The gallery camera, shoreline field and reflection tests pass. The new capture and independent scores remain pending.
 
 - Graduated trackside tree height from maintained suckers to mature woodland. In the same lakeside scene, the tallest rooted tree within 14 m of rail fell from 17.56 m to 2.78 m, and the tallest within 26 m fell from 18.95 m to 5.01 m. The mapped forest footprint and shrub exclusions still apply.
 - Added autumn colour within the birch shader using leaf chroma before any instance tint. In the original cutout, the mask strongly selected 75% of the sampled opaque canopy pixels and selected zero of the 4,023 sampled bare-stem pixels. Pine and spruce bypass the autumn mask.

@@ -161,3 +161,8 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - On the Seimsgrend–Bulken tile, 1,707 trackbed probes found a maximum gap of 0.316 m with zero misses. All 26,820 coach-clearance probes passed. TypeScript, targeted lint, and five boarding and roof tests passed.
 
 - Cleared foliage from the mapped tunnel mouths, including the Bulken approach in shot 05. The mask uses 12.8 m plus half the plant’s width and joins contiguous OSM tunnel ways before calculating portal positions. Streamed tiles use the neighboring rail window so a tile edge does not create or lose a clearing. The closest rooted plants at the two mapped Bulken mouths are now 13.30 m and 13.71 m away, with 52 and 35 roots still present in the nearby 15–25 m ring. Typecheck, targeted lint and all five vegetation tests passed.
+
+## Waiting passengers at Seimsgrend and Bulken
+
+- Closed the gap between jacket and trousers with an overlapping coat hem. Eight coat colors, alternating stances and sparse luggage distinguish waiting passengers. Walking keeps the existing path and footfall timing.
+- A before-and-after check on the published Seimsgrend–Bulken tile found all thirteen waiting positions identical and the same boarding counts at both stops under the same sill placement. TypeScript, targeted lint, and all three boarding tests passed.

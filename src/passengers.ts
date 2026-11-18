@@ -10,7 +10,8 @@ export interface PassengerPlatform {
 }
 
 const up = new Vector3(0, 1, 0);
-const jackets = [0x9a523e, 0x3d615e, 0x333d52, 0xb68749, 0x5d4c61, 0x6d7656, 0x7a483f];
+// Consecutive people use distinct coats even where the camera only sees two or three figures.
+const jackets = [0x944635, 0x354e65, 0x696f61, 0x523e58, 0x48645f, 0x9a794a, 0x434a53, 0x6d4b49];
 const trousers = [0x3d454c, 0x3d4f66, 0x55524b, 0x414143];
 const skinTones = [0xc18b68, 0xd8a37a, 0xa87758, 0x976242, 0xd0a584, 0xae775d];
 const hairTones = [0x312823, 0x4e3328, 0x97704d, 0x5c4b40];
@@ -52,6 +53,10 @@ interface Walker {
   standing: Vector3;
   position: Vector3;
   yaw: number;
+  waitingYaw: number;
+  stance: number;
+  armPose: number;
+  luggage: number;
   size: number;
   seed: number;
   jacket: Color;
@@ -90,6 +95,7 @@ function waitingPassengers(
     };
     const choose = (options: number[]) => new Color(options[Math.floor(random() * options.length)]);
     const waiting: Walker[] = [];
+    const coatOffset = station.osmId % jackets.length;
     for (let attempt = 0; attempt < 150 && waiting.length < 8; attempt++) {
       const down = 15 - random() * 52;
       const across = (2.65 + random() * 3.4) * (attempt % 2 ? 1 : -1);
@@ -101,10 +107,19 @@ function waitingPassengers(
       if (!platform) continue;
       standing.y = platform.levelAt(standing.x, standing.z);
       if (Math.abs(standing.y - origin.y) > 1.6) continue;
-      const yaw = Math.atan2(origin.x - standing.x, origin.z - standing.z) + (random() - 0.5) * 0.9;
+      const facing = random() - 0.5;
+      const yaw = Math.atan2(origin.x - standing.x, origin.z - standing.z) + facing * 0.9;
+      const size = 0.9 + random() * 0.19;
+      const seed = random() * 5;
+      // Retain the placement stream's draw order so appearance changes preserve every standing point.
+      const style = random();
+      const waitingYaw = yaw + (waiting.length % 3 === 0 ? Math.sign(facing) * 0.85 : facing * 0.6);
       waiting.push({
-        platform, standing, position: standing.clone(), yaw,
-        size: 0.9 + random() * 0.19, seed: random() * 5, jacket: choose(jackets),
+        platform, standing, position: standing.clone(), yaw, waitingYaw, size, seed,
+        stance: (style - 0.5) * 0.085,
+        armPose: waiting.length % 3,
+        luggage: waiting.length % 4 === 1 ? 1 : waiting.length % 4 === 3 && style > 0.7 ? 2 : 0,
+        jacket: new Color(jackets[(coatOffset + waiting.length * 3) % jackets.length]),
         pants: choose(trousers), skin: choose(skinTones), hair: choose(hairTones), boarded: false,
       });
     }
@@ -113,7 +128,7 @@ function waitingPassengers(
   return people;
 }
 
-const partsPerPassenger = 16;
+const partsPerPassenger = 18;
 
 export function createPassengers(
   stations: Station[],
@@ -135,16 +150,18 @@ export function createPassengers(
   if (people.length) group.add(figures);
   const pose = new Object3D();
   const sole = new Color(0x28292b);
-  const bag = new Color(0x444644);
+  const backpack = new Color(0x373c40);
+  const satchel = new Color(0x514a3d);
 
   function draw(camera?: Vector3) {
     let shown = 0;
     for (const passenger of people) {
       if (passenger.boarded || camera && camera.distanceToSquared(passenger.position) > 195 ** 2) continue;
-      const { position, size, seed, yaw, jacket, pants, skin, hair } = passenger;
+      const { position, size, seed, jacket, pants, skin, hair, stance, armPose, luggage } = passenger;
+      const walking = passenger.trip && passenger.trip.progress > 0;
+      const yaw = walking ? passenger.yaw : passenger.waitingYaw;
       const sin = Math.sin(yaw);
       const cos = Math.cos(yaw);
-      const walking = passenger.trip && passenger.trip.progress > 0;
       const pace = Math.sin(elapsed * 8.2 + seed) * Number(Boolean(walking));
       const idle = Math.sin(elapsed * 1.3 + seed) * 0.042;
       const part = (x: number, height: number, z: number, width: number, scaleY: number, depth: number, rotation: number, color: Color) => {
@@ -158,19 +175,30 @@ export function createPassengers(
         shown++;
       };
 
+      part(0, 0.785, 0, 0.154, 0.107, 0.127, idle, jacket);
       part(0, 1.09, 0, 0.164, 0.21, 0.136, idle, jacket);
       part(0, 1.34, 0.01, 0.188, 0.12, 0.115, idle, jacket);
       part(0, 1.51, 0.023, 0.052, 0.037, 0.058, idle, skin);
       part(0, 1.65, 0.026, 0.104, 0.077, 0.104, idle, skin);
       part(0, 1.733, 0.007, 0.108, 0.036, 0.106, idle, hair);
-      part(0.025, 1.17, -0.138, 0.144, 0.146, 0.084, idle, bag);
+      if (luggage === 1) part(0.025, 1.17, -0.132, 0.128, 0.139, 0.083, idle, backpack);
+      if (luggage === 2) {
+        part(-0.177, 0.79, -0.033, 0.099, 0.10, 0.084, idle, satchel);
+        part(-0.145, 0.97, -0.036, 0.023, 0.105, 0.025, idle, satchel);
+      }
       for (const side of [-1, 1]) {
         const swing = side * pace;
-        part(side * 0.097, 0.52, swing * 0.16, 0.072, 0.15, 0.075, swing * -0.45, pants);
-        part(side * 0.098, 0.23 + Math.max(0, swing) * 0.045, swing * 0.31, 0.062, 0.134, 0.069, swing * -0.36, pants);
-        part(side * 0.098, 0.066 + Math.max(0, swing) * 0.064, 0.047 + swing * 0.36, 0.066, 0.036, 0.128, 0, sole);
-        part(side * 0.208, 1.15, -swing * 0.11, 0.06, 0.141, 0.062, swing * 0.43, jacket);
-        part(side * 0.209, 0.936, -swing * 0.16, 0.044, 0.037, 0.043, swing * 0.43, skin);
+        const footSetback = walking ? 0 : side * stance;
+        const handInPocket = !walking && (armPose === 1 || armPose === 2 && side > 0);
+        part(side * 0.097, 0.55, swing * 0.16 + footSetback * 0.35, 0.078, 0.164, 0.079, swing * -0.45, pants);
+        part(side * 0.098, 0.23 + Math.max(0, swing) * 0.045, swing * 0.31 + footSetback,
+          0.062, 0.134, 0.069, swing * -0.36, pants);
+        part(side * 0.098, 0.066 + Math.max(0, swing) * 0.064, 0.047 + swing * 0.36 + footSetback,
+          0.066, 0.036, 0.128, 0, sole);
+        const armAngle = handInPocket ? -0.26 : swing * 0.43;
+        part(side * (handInPocket ? 0.186 : 0.208), 1.15, -swing * 0.11 + (handInPocket ? 0.051 : 0),
+          0.06, 0.153, 0.062, armAngle, jacket);
+        if (!handInPocket) part(side * 0.209, 0.92, -swing * 0.16, 0.044, 0.041, 0.043, armAngle, skin);
       }
     }
     figures.count = shown;
@@ -202,6 +230,7 @@ export function createPassengers(
         const edge = boardingApproach(passenger.platform, passenger.position, door);
         if (!edge) continue;
         nearest = distance;
+        passenger.yaw = passenger.waitingYaw;
         passenger.trip = {
           start: passenger.position.clone(), edge, end: door.clone(), progress: -0.6 - passenger.seed * 0.19,
           seconds: Math.max(0.2, passenger.position.distanceTo(edge) / 1.27), lift: true,

@@ -226,3 +226,8 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - The lowest category held at 2/10 for the second successive round. Both reviewers found the foreground trees and broad water fade hurt the bridge shot. They also flagged airborne snow over the Bulken cab trim, the blank tunnel cut and sparse detail on the high Voss view. [Review A](reference/r40/review-a.md) · [Review B](reference/r40/review-b.md)
 - The full release check passed the R40 sources, rendered clearance, six weather replays and all three 1080p High graphics workload samples. Intercity service geography and replays passed. The all-tile intercity clearance and offline browser check are still running.
 - The next render batch restores the wider bridge angle and corrects the mapped river-edge intersection. It also includes cab and tunnel material revisions, warmer station lamps, shorter foreground grasses and a new same-chainage Voss composition.
+
+## Independent keyboard retest
+
+- The reviewer completed the six-step practice and served all three stops manually in a fresh Low session at 960×600. The terminal card records Grade D, 67/100, 2.8 m from the marker, 39 passengers carried and zero remaining aboard. The reviewer also closed the doors after dwell. All four new screenshots decoded at their recorded viewport size.
+- The reviewer confirmed the stop-zone door cue at every platform and reproduced a small-window Dismiss collision and an unnecessary traction cue near Voss. The next build moves the cards above the driving gauges and favors coasting when already rolling toward a near stop. Its direct layout check and all six replays passed. The reviewer is driving that build next. [Playtest notes and cards](reference/r40/keyboard/README.md)

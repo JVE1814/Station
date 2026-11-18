@@ -32,7 +32,7 @@ const skyPalette = {
 function skyTexture(sky: Sky, width: number, height: number): DataTexture {
   const data = new Uint8Array(width * height * 4);
   const colors = skyPalette[sky];
-  const sun = new Vector3(-0.56, 0.68, 0.36).normalize();
+  const sun = new Vector3(-0.75, 0.43, 0.52).normalize();
   for (let row = 0; row < height; row++) {
     const latitude = ((row + 0.5) / height - 0.5) * Math.PI;
     const elevation = Math.sin(latitude);
@@ -81,7 +81,7 @@ export class Atmosphere {
   private readonly fill = new HemisphereLight(0xc3e0ff, 0x76684e, 2.2);
   private readonly fog = new FogExp2(0xb4c9d5, 0.00017);
   private readonly shadowCenter = new Vector3(Infinity, 0, 0);
-  private readonly sunOffset = new Vector3(-100, 135, 70);
+  private readonly sunOffset = new Vector3(-135, 78, 94);
   private readonly cloudTextures = new Map<Sky, DataTexture>();
   private readonly dome = new Mesh(
     new SphereGeometry(1, 28, 20),
@@ -90,6 +90,10 @@ export class Atmosphere {
   private readonly particles: Points<BufferGeometry, PointsMaterial>;
   private readonly positions: Float32Array;
   private weather: Weather = 'clear';
+  private density = 0.00013;
+  private sunLevel = 2.7;
+  private fillLevel = 1.58;
+  private shelter = 0;
 
   constructor(private readonly scene: Scene) {
     this.sun.castShadow = true;
@@ -138,24 +142,29 @@ export class Atmosphere {
     if (!this.dome.material.map) this.dome.material.needsUpdate = true;
     this.dome.material.map = skyMap;
     this.fog.color.copy(color);
-    this.fog.density = weather === 'clear' ? 0.00013 : weather === 'snow' ? 0.0034 : 0.0021;
-    this.sun.intensity = night ? 0.13 : weather === 'clear' ? 2.7 : 0.75;
+    this.density = weather === 'clear' ? 0.00013 : weather === 'snow' ? 0.0034 : 0.0021;
+    this.sunLevel = night ? 0.32 : weather === 'clear' ? 2.7 : 0.75;
     this.sun.color.setHex(night ? 0x9aaeff : 0xffe0af);
-    this.fill.intensity = night ? 0.23 : weather === 'clear' ? 2.1 : 2.6;
-    this.fill.color.setHex(night ? 0x7189bd : 0xc3e0ff);
+    this.fillLevel = night ? 0.88 : weather === 'clear' ? 1.58 : 2.25;
+    this.fill.color.setHex(night ? 0xa6bbf1 : 0xc3e0ff);
     this.sun.shadow.needsUpdate = true;
     this.particles.material.size = weather === 'snow' ? 0.12 : 0.05;
     this.particles.visible = weather !== 'clear';
   }
 
-  update(position: Vector3, cameraPosition: Vector3, elapsed: number): void {
+  update(position: Vector3, cameraPosition: Vector3, elapsed: number, underCover = false): void {
+    this.shelter += (Number(underCover) - this.shelter) * (1 - Math.exp(-elapsed * 4));
+    this.sun.intensity = this.sunLevel * (1 - this.shelter * 0.995);
+    this.fill.intensity = this.fillLevel * (1 - this.shelter * 0.93);
     this.dome.position.copy(cameraPosition);
+    this.fog.density = this.density / (1 + Math.max(0, cameraPosition.y - position.y) / 500);
     if (this.shadowCenter.distanceToSquared(position) >= 0.85 ** 2) {
       this.shadowCenter.copy(position);
       this.sun.target.position.copy(position);
       this.sun.position.copy(position).add(this.sunOffset);
       this.sun.shadow.needsUpdate = true;
     }
+    this.particles.visible = this.weather !== 'clear' && !underCover;
     if (!this.particles.visible) return;
     this.particles.position.copy(position);
     this.particles.position.y -= 3;

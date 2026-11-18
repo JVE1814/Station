@@ -77,3 +77,10 @@ meter::-webkit-meter-optimum-value { background: #d4ad6a; }
   kbd { display: none; }
   .bottom-bar { flex-wrap: wrap; }
 }
+
+#signal:empty { display: none; }
+#signal { font-size: 12px; margin-top: 5px; color: #a7e4b0; }
+#signal[data-aspect="approach"] { color: #f8ce81; }
+#signal[data-aspect="stop"] { color: #ffa896; }
+
+#route-picker { margin-top: 9px; max-width: 100%; border: 1px solid #657078; border-radius: 4px; padding: 4px; color: #f4f1e9; background: #172127; }

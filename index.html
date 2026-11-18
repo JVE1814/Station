@@ -15,17 +15,21 @@
           <div class="service-line"><span id="line"></span><time id="clock"></time></div>
           <h1 id="journey">Station</h1>
           <p id="next-stop"></p>
+          <p id="signal"></p>
+          <select id="route-picker" aria-label="Passenger service" hidden></select>
         </section>
         <div class="toolbar" aria-label="View and environment">
           <div class="group" aria-label="Camera views">
             <button id="cab-view" aria-pressed="true">Cab <kbd>1</kbd></button>
             <button id="chase-view" aria-pressed="false">Chase <kbd>2</kbd></button>
+            <button id="fit-network" hidden>Fit network</button>
             <button id="map-view" aria-pressed="false">Bird’s-eye <kbd>3</kbd></button>
           </div>
           <div class="group" aria-label="Weather and time">
             <button id="day">Day</button>
             <button id="weather">Clear</button>
             <button id="compression">1×</button>
+            <button id="pause" aria-pressed="false">Pause <kbd>P</kbd></button>
           </div>
         </div>
       </div>

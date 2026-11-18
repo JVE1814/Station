@@ -107,7 +107,11 @@ def extract(snapshot: Path, ids: list[int], bounds: tuple | None = None) -> dict
         raise ValueError(f"Missing OSM relation ways: {sorted(missing_ways)}")
     if missing_nodes := features.node_ids - features.nodes.keys():
         raise ValueError(f"Missing OSM relation nodes: {sorted(missing_nodes)}")
-    return {"relations": relations.data, "ways": features.ways, "nodes": features.nodes}
+    return {
+        "relations": {str(key): value for key, value in relations.data.items()},
+        "ways": {str(key): value for key, value in features.ways.items()},
+        "nodes": {str(key): value for key, value in features.nodes.items()},
+    }
 
 
 def extract_vicinity(snapshot: Path, bounds: tuple, work: Path) -> dict:

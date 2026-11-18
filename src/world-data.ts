@@ -15,6 +15,7 @@ export interface TrackSpan {
   start: number;
   end: number;
   osmWay: number;
+  direction?: 'forward' | 'backward';
   electrified: boolean;
   tunnel: boolean;
   bridge: boolean;
@@ -26,6 +27,7 @@ export interface Station {
   osmId: number;
   position: LocalPoint;
   stopDistance: number;
+  reversal?: boolean;
 }
 
 export interface WorldFeature {
@@ -33,12 +35,33 @@ export interface WorldFeature {
   type: 'building' | 'platform' | 'forest' | 'water' | 'signal' | 'track';
   points: LocalPoint[];
   holes?: LocalPoint[][];
+  chainage?: number;
+  facesService?: boolean;
+  heading?: LocalPoint;
   tags: Record<string, string>;
+}
+
+export interface TimedCall {
+  stationOsmId: number;
+  arrival: string;
+  departure: string;
+}
+
+export interface Timetable {
+  trip: string;
+  headsign: string;
+  departure: string;
+  arrival: string;
+  calls?: TimedCall[];
+}
+
+export function timetableSeconds(hhmmss: string): number {
+  return hhmmss.split(':').map(Number).reduce((seconds, component) => seconds * 60 + component, 0);
 }
 
 export interface WorldData {
   service: string;
-  timetable?: { trip: string; headsign: string; departure: string; arrival: string };
+  timetable?: Timetable;
   rail: RailPoint[];
   spans: TrackSpan[];
   terrain: TerrainData;

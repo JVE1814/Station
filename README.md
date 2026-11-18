@@ -4,14 +4,14 @@ Station is a desktop browser train simulator. The current service is R40 between
 
 ## Run
 
-Install Node.js 22.18 or newer and run:
+Install Node.js 22.18 or newer and run the development server.
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Open the local address printed by Vite. Use a WebGL2-capable browser. To serve the production build:
+Open the local address printed by Vite. Use a WebGL2-capable browser. Run these commands to serve the production build.
 
 ```sh
 npm run build
@@ -31,6 +31,7 @@ The static build serves its JavaScript, geometry and timetable locally. Gameplay
 | 1 / 2 / 3 | Cab / chase / bird’s-eye |
 | Drag / scroll | Look or pan / zoom |
 | T | Cycle the time rate |
+| P | Pause or resume the game |
 | A | Toggle automatic driving |
 
 Start by releasing the brakes with Q, then apply power with W. Watch the speed limit and the distance to the next stop. Brake to a standstill at the stopping marker and open the doors to register the stop. The buttons in the top bar switch time of day and weather.
@@ -44,13 +45,13 @@ Start by releasing the brakes with Q, then apply power with W. Watch the speed l
 
 ## Rebuild data and verify
 
-For a data bake, install Python 3.12+, osmium-tool, GDAL with `gdalbuildvrt` and `gdalwarp`, and the Python requirements in an active virtual environment. The first data bake downloads the pinned 1.38 GB OSM snapshot and the Copernicus DEM tiles it needs into `.cache/`.
+For a data bake, install Python 3.12+, osmium-tool, GDAL with `gdalbuildvrt` and `gdalwarp`, and the Python requirements in an active virtual environment. The first data bake downloads the pinned 1.38 GB OSM snapshot and the Copernicus DEM tiles it needs into `.cache/`. `npm run data:pair` regenerates the R40 checkpoint alone. The full bake uses the committed dated Entur extracts and installs gzip scenery tiles, a service catalog and the route manifest.
 
 ```sh
 python -m pip install -r scripts/requirements.txt
 npm run data
 ```
 
-Run the current station-pair checks with `npm run verify:pair`. The browser check expects Chromium at `/usr/bin/chromium`; set `CHROMIUM_PATH` for a different installation. `npm run verify:browser -- --captures` writes 1080p captures to `evidence/`.
+Run all automated checks with `npm run verify` or the station-pair checks with `npm run verify:pair`. The verification runner reports each check separately. The browser check expects Chromium at `/usr/bin/chromium`; set `CHROMIUM_PATH` for a different installation. `npm run verify:browser -- --captures` writes 1080p captures to `evidence/`.
 
-See [PROGRESS.md](PROGRESS.md) for review status and [ASSETS.md](ASSETS.md) for attribution.
+The playable checkpoint and its side-by-side screenshots are indexed in [evidence](evidence/README.md). See [PROGRESS.md](PROGRESS.md) for review status and [ASSETS.md](ASSETS.md) for attribution.

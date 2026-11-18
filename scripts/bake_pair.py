@@ -119,6 +119,45 @@ def rail_profile(path, ways, project, grid):
     return profile, spans, chainages
 
 
+def signal_feature(osm_id, item, alignment_path, alignment_chainages, local_ways, project):
+    source_id = int(osm_id)
+    tags = item["tags"]
+    point = list(project(*item["point"]))
+    result = {"osmId": source_id, "type": "signal", "tags": tags, "points": [point]}
+    direction = tags.get("railway:signal:direction", "both")
+    for index, entry in enumerate(alignment_path[:-1]):
+        if entry["node"] != source_id:
+            continue
+        following = alignment_path[index + 1]
+        way = local_ways.get(str(following["way"]))
+        if way is None:
+            break
+        nodes = way["nodeIds"]
+        along = nodes.index(source_id) < nodes.index(following["node"])
+        faces_service = direction in {"both", "forward" if along else "backward"}
+        heading = project(*following["point"])
+        sign = 1 if faces_service else -1
+        result.update({
+            "chainage": round(alignment_chainages[source_id], 4),
+            "facesService": faces_service,
+            "heading": [sign * (heading[0] - point[0]), sign * (heading[1] - point[1])],
+        })
+        return result
+
+    for way in local_ways.values():
+        if way["tags"].get("railway") != "rail":
+            continue
+        nodes = way["nodeIds"]
+        if source_id not in nodes:
+            continue
+        index = nodes.index(source_id)
+        a, b = (project(*way["points"][i]) for i in (max(0, index - 1), min(len(nodes) - 1, index + 1)))
+        sign = -1 if direction == "backward" else 1
+        result["heading"] = [sign * (b[0] - a[0]), sign * (b[1] - a[1])]
+        break
+    return result
+
+
 def bake(inventory, relation_id, start, finish, output, timetable=None):
     path = alignment(inventory, relation_id, start, finish)
     relation = inventory["relations"][str(relation_id)]
@@ -209,10 +248,9 @@ def bake(inventory, relation_id, start, finish, output, timetable=None):
 
     for osm_id, item in vicinity["nodes"].items():
         if item["tags"].get("railway") == "signal":
-            features.append({
-                "osmId": int(osm_id), "type": "signal", "tags": item["tags"],
-                "points": [list(project(*item["point"]))],
-            })
+            features.append(signal_feature(
+                osm_id, item, path, chainages, vicinity["ways"], project,
+            ))
 
     relation = inventory["relations"][str(relation_id)]["tags"]
     world = {
@@ -225,7 +263,9 @@ def bake(inventory, relation_id, start, finish, output, timetable=None):
             raise ValueError("Timetable line does not match the OSM service")
         world["timetable"] = timetable["services"][0]
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(world, ensure_ascii=False, separators=(",", ":")) + "\n")
+    pending = output.with_suffix(".partial.json")
+    pending.write_text(json.dumps(world, ensure_ascii=False, separators=(",", ":")) + "\n")
+    pending.replace(output)
     service_length = stations[-1]["stopDistance"] - stations[0]["stopDistance"]
     print(f"{stations[0]['name']} → {stations[-1]['name']}: {service_length:.1f} m, {len(features)} geographic features")
 

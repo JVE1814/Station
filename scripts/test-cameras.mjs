@@ -1,0 +1,40 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { Group, Vector3 } from 'three';
+import { Cameras } from '../src/cameras.ts';
+
+test('every settled camera follows interpolated train motion frame to frame', () => {
+  const camera = new Cameras();
+  const train = new Group();
+  const eye = new Vector3(0.38, 2.70, -9.33);
+  for (const mode of ['cab', 'chase', 'map']) {
+    camera.select(mode);
+    for (let frame = 0; frame < 60; frame++) camera.update(train, eye, 1 / 60);
+    assert.ok(camera.settled);
+    let previous = camera.camera.position.clone();
+    let orientation = camera.camera.quaternion.clone();
+    for (let frame = 0; frame < 120; frame++) {
+      train.position.x += 19 / 60;
+      camera.update(train, eye, 1 / 60);
+      assert.ok(Math.abs(camera.camera.position.distanceTo(previous) - 19 / 60) < 1e-8);
+      assert.ok(camera.camera.quaternion.angleTo(orientation) < 1e-6);
+      previous = camera.camera.position.clone();
+      orientation = camera.camera.quaternion.clone();
+    }
+  }
+});
+
+test('switching into the map animates from the current camera pose', () => {
+  const camera = new Cameras();
+  const train = new Group();
+  const eye = new Vector3(0.38, 2.70, -9.33);
+  camera.update(train, eye, 1 / 60);
+  const beginning = camera.camera.position.clone();
+  camera.select('map');
+  camera.update(train, eye, 1 / 60);
+  assert.ok(camera.camera.position.distanceTo(beginning) < 2);
+  const firstFrame = camera.camera.position.clone();
+  for (let frame = 0; frame < 60; frame++) camera.update(train, eye, 1 / 60);
+  assert.ok(camera.camera.position.distanceTo(firstFrame) > 500);
+  assert.ok(camera.settled);
+});

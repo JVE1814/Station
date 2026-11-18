@@ -16,6 +16,7 @@ export class Cameras {
   private readonly rotation = new Euler(0, 0, 0, 'YXZ');
   private readonly orbit = new Spherical(30, 1.18, 2.35);
   private readonly mapOffset = new Vector3(0, 530, 0);
+  private mapLimit = 14000;
   private cabYaw = 0;
   private cabPitch = -0.095;
   private initialized = false;
@@ -27,10 +28,29 @@ export class Cameras {
 
   select(view: View): void {
     if (this.view === view) return;
+    this.view = view;
+    this.relocate();
+  }
+
+  relocate(): void {
     this.previousPosition.copy(this.camera.position);
     this.previousOrientation.copy(this.camera.quaternion);
-    this.view = view;
     this.transition = 0.72;
+  }
+
+  allowMapExtent(height: number): void {
+    this.mapLimit = Math.max(this.mapLimit, height);
+  }
+
+  fitMap(center: Vector3, source: Vector3, height: number): void {
+    this.allowMapExtent(height);
+    this.mapOffset.set(center.x - source.x, height, center.z - source.z);
+    this.select('map');
+    this.relocate();
+  }
+
+  get mapHeight(): number {
+    return this.mapOffset.y;
   }
 
   drag(x: number, y: number): void {
@@ -50,7 +70,7 @@ export class Cameras {
     if (this.view === 'chase') {
       this.orbit.radius = MathUtils.clamp(this.orbit.radius * Math.exp(delta * 0.001), 11, 105);
     } else if (this.view === 'map') {
-      this.mapOffset.y = MathUtils.clamp(this.mapOffset.y * Math.exp(delta * 0.001), 28, 14000);
+      this.mapOffset.y = MathUtils.clamp(this.mapOffset.y * Math.exp(delta * 0.001), 28, this.mapLimit);
     }
   }
 
@@ -78,6 +98,14 @@ export class Cameras {
     this.transition = Math.max(0, this.transition - elapsed);
     const progress = 1 - this.transition / 0.72;
     const blend = this.initialized ? progress * progress * (3 - 2 * progress) : 1;
+    const elevation = this.view === 'map' ? this.mapOffset.y : 0;
+    const far = Math.max(18000, elevation * 3.4);
+    const near = elevation > 6000 ? Math.max(5, elevation / 2600) : 0.06;
+    if (this.camera.far !== far || this.camera.near !== near) {
+      this.camera.far = far;
+      this.camera.near = near;
+      this.camera.updateProjectionMatrix();
+    }
     this.camera.position.lerpVectors(this.previousPosition, this.destination, blend);
     this.camera.quaternion.slerpQuaternions(this.previousOrientation, this.orientation, blend);
     this.initialized = true;

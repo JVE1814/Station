@@ -1,14 +1,20 @@
 import {
-  ACESFilmicToneMapping, Group, Matrix4, PCFShadowMap, Quaternion, Scene, Vector3, WebGLRenderer,
+  ACESFilmicToneMapping, Group, Matrix4, PCFShadowMap, Quaternion, RepeatWrapping, Scene, SRGBColorSpace, TextureLoader, Vector3, WebGLRenderer,
 } from 'three';
 import { Atmosphere, skyReflection } from './atmosphere';
 import type { Weather } from './atmosphere';
 import { Cameras } from './cameras';
 import type { View } from './cameras';
+import { loadNetworkRoute, readWorldAsset } from './network';
+import { NetworkOverview } from './network-overview';
+import routeCatalog from '../data/route-catalog.json';
 import { Rail } from './rail';
 import { createCab, createTrain } from './rolling-stock';
 import { auditTrackbed, createScenery } from './scenery';
 import { Service } from './service';
+import { SceneryStream } from './streaming';
+import { Traffic } from './traffic';
+import { timetableSeconds } from './world-data';
 import type { WorldData } from './world-data';
 import './style.css';
 
@@ -19,11 +25,16 @@ function element<T extends HTMLElement = HTMLElement>(id: string): T {
 }
 
 async function run(): Promise<void> {
-  const response = await fetch(`${import.meta.env.BASE_URL}data/service.json`);
-  if (!response.ok) throw new Error('The offline service file could not be loaded.');
-  const data: WorldData = await response.json();
+  const options = new URLSearchParams(location.search);
+  const ref = options.get('line');
+  const networkData = ref && ['F4', 'F5', 'F6'].includes(ref) ? await loadNetworkRoute(ref) : null;
+  const network = networkData?.line;
+  const pair = network ? null : await readWorldAsset<WorldData>('data/service.json');
+  if (!network && !pair) throw new Error('The offline service file could not be loaded.');
+  const data = network ? { ...network, service: network.ref } : pair!;
   const rail = new Rail(data.rail);
   const service = new Service(data, rail);
+  const traffic = network?.traffic?.length ? new Traffic(data, rail, service, network.traffic) : null;
   const scene = new Scene();
   const renderer = new WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio));
@@ -41,22 +52,44 @@ async function run(): Promise<void> {
   scene.environmentIntensity = 0.55;
 
   world.dataset.stage = 'scenery';
-  const scenery = createScenery(data, rail);
+  const textures = new TextureLoader();
+  const loadMap = async (name: string) => {
+    const texture = await textures.loadAsync(`${import.meta.env.BASE_URL}assets/${name}.webp`);
+    texture.colorSpace = SRGBColorSpace;
+    texture.wrapS = texture.wrapT = RepeatWrapping;
+    texture.anisotropy = 8;
+    return texture;
+  };
+  const [grass, ballast, spruce, siding, roofing, dashboard, steel] = await Promise.all([
+    'grass', 'ballast', 'spruce', 'siding', 'roofing', 'dashboard', 'steel',
+  ].map(loadMap));
+  const maps = { grass, ballast, spruce, siding, roofing };
+  const scenery = pair ? createScenery(pair, rail, maps) : new SceneryStream(network!.tiles, maps, error => {
+    element('notice').textContent = 'A scenery tile could not be loaded.';
+    console.error(error);
+  });
+  if (scenery instanceof SceneryStream) await scenery.ready(data.stations[0].stopDistance);
   scene.add(scenery.group);
-  const audit = new URLSearchParams(location.search).get('audit') === 'trackbed';
+  const audit = options.get('audit') === 'trackbed';
   if (audit) {
     const gl = renderer.getContext();
     const driver = gl.getExtension('WEBGL_debug_renderer_info');
     world.dataset.renderer = gl.getParameter(driver ? driver.UNMASKED_RENDERER_WEBGL : gl.RENDERER);
     world.dataset.stage = 'terrain-audit';
-    world.dataset.trackbedAudit = JSON.stringify(auditTrackbed(scenery.group, rail, data));
+    if (pair) world.dataset.trackbedAudit = JSON.stringify(auditTrackbed(scenery.group, rail, pair));
   }
   world.dataset.stage = 'rolling-stock';
   const atmosphere = new Atmosphere(scene);
   const cameras = new Cameras();
-  const cab = createCab();
-  const coaches = [createTrain(true), createTrain(false), createTrain(false)];
+  const overview = networkData ? new NetworkOverview(networkData.routes) : null;
+  if (overview) {
+    scene.add(overview.group);
+    cameras.allowMapExtent(overview.fitHeight * 1.35);
+  }
+  const cab = createCab(dashboard);
+  const coaches = [createTrain(true, steel), createTrain(false, steel), createTrain(true, steel)];
   scene.add(cab.group, ...coaches.map(coach => coach.group));
+  const trafficModels = new Map<string, ReturnType<typeof createTrain>[]>();
   const matrix = new Matrix4();
   const up = new Vector3(0, 1, 0);
   const inverse = new Quaternion();
@@ -70,7 +103,40 @@ async function run(): Promise<void> {
     group.rotateZ(rail.pose(distance, 6).cant);
   }
 
+  let dirty = true;
+  let paused = false;
+
+  function placeConsist(
+    consist: ReturnType<typeof createTrain>[],
+    movement: Service,
+    elapsed: number,
+    hideNose: boolean,
+  ): void {
+    const reversed = movement.reversals % 2 !== 0;
+    const leadIndex = reversed ? 2 : 0;
+    const reference = movement.chainage();
+    consist.forEach((coach, index) => {
+      const order = reversed ? 2 - index : index;
+      const distance = reference - order * 24.6;
+      const backward = index === 1 ? reversed : index !== leadIndex;
+      place(coach.group, distance);
+      if (backward) coach.group.rotateY(Math.PI);
+      inverse.copy(coach.group.quaternion).invert();
+      const direction = backward ? -1 : 1;
+      coach.bogies.forEach((bogie, axle) => {
+        const pose = rail.pose(distance + direction * (axle === 0 ? 8.3 : -8.3), 2);
+        bogie.position.copy(pose.position).sub(coach.group.position).applyQuaternion(inverse);
+        matrix.lookAt(pose.position, pose.position.clone().addScaledVector(pose.tangent, direction), up);
+        bogie.quaternion.setFromRotationMatrix(matrix).premultiply(inverse);
+      });
+      coach.group.visible = !(hideNose && index === leadIndex);
+      coach.update({ ...movement.controls, speed: movement.state.speed, night: night || movement.trackSpan.tunnel, deltaSeconds: elapsed,
+        headlights: index === leadIndex });
+    });
+  }
+
   function resize(): void {
+    dirty = true;
     renderer.setSize(world.clientWidth, world.clientHeight);
     cameras.camera.aspect = world.clientWidth / world.clientHeight;
     cameras.camera.updateProjectionMatrix();
@@ -85,10 +151,18 @@ async function run(): Promise<void> {
   let noticeUntil = 0;
   let audio: AudioContext | undefined;
   const notice = element('notice');
-  element('journey').textContent = data.stations.map(station => station.name).join(' → ');
+  const routeSelect = element<HTMLSelectElement>('route-picker');
+  for (const route of routeCatalog) routeSelect.add(new Option(`${route.ref} · ${route.name}`, route.ref));
+  routeSelect.value = data.service;
+  routeSelect.hidden = routeCatalog.length < 2;
+  routeSelect.addEventListener('change', () => {
+    const destination = new URL(window.location.href);
+    destination.searchParams.set('line', routeSelect.value);
+    destination.searchParams.delete('audit');
+    location.assign(destination.href);
+  });
+  element('journey').textContent = [service.stops[0], service.stops.at(-1)!].map(station => station.name).join(' → ');
   element('line').textContent = data.service;
-  const timetableSeconds = (hhmmss: string) => hhmmss.split(':').map(Number)
-    .reduce((seconds, component) => seconds * 60 + component, 0);
   const departure = data.timetable ? timetableSeconds(data.timetable.departure) : 0;
   const arrival = data.timetable ? timetableSeconds(data.timetable.arrival) : 0;
 
@@ -98,9 +172,10 @@ async function run(): Promise<void> {
   }
 
   function configureWeather(): void {
+    dirty = true;
     atmosphere.set(night, weather);
     scene.environment = night ? nightReflection : dayReflection;
-    scene.environmentIntensity = night ? 0.25 : 0.55;
+    scene.environmentIntensity = night ? 0.38 : 0.55;
     scenery.setWeather(weather);
     scenery.setNight(night);
     element('day').textContent = night ? 'Night' : 'Day';
@@ -110,6 +185,8 @@ async function run(): Promise<void> {
   function switchView(view: View): void {
     if (cameras.view !== view) delete world.dataset.view;
     cameras.select(view);
+    element('fit-network').hidden = !overview || view !== 'map';
+    dirty = true;
     for (const selector of ['cab', 'chase', 'map']) {
       element(`${selector}-view`).setAttribute('aria-pressed', String(selector === view));
     }
@@ -143,9 +220,23 @@ async function run(): Promise<void> {
     'cab-view': () => switchView('cab'),
     'chase-view': () => switchView('chase'),
     'map-view': () => switchView('map'),
+    'fit-network': () => {
+      if (!overview) return;
+      const expanded = cameras.mapHeight > 5000;
+      cameras.fitMap(expanded ? cab.group.position : overview.center, cab.group.position,
+        expanded ? 530 : overview.fitHeight);
+      element('fit-network').textContent = expanded ? 'Fit network' : 'Follow train';
+    },
     day: () => { night = !night; configureWeather(); },
     weather: () => { weather = weather === 'clear' ? 'rain' : weather === 'rain' ? 'snow' : 'clear'; configureWeather(); },
     compression: () => { timeScale = timeScale === 1 ? 2 : timeScale === 2 ? 5 : 1; element('compression').textContent = `${timeScale}×`; },
+    pause: () => {
+      paused = !paused;
+      dirty = true;
+      const button = element('pause');
+      button.firstChild!.textContent = paused ? 'Resume ' : 'Pause ';
+      button.setAttribute('aria-pressed', String(paused));
+    },
     'more-power': () => drive('throttle', 0.2),
     'less-power': () => drive('throttle', -0.2),
     'more-brake': () => drive('brake', 0.2),
@@ -158,70 +249,116 @@ async function run(): Promise<void> {
   const keys: Record<string, string> = {
     '1': 'cab-view', '2': 'chase-view', '3': 'map-view',
     w: 'more-power', s: 'less-power', e: 'more-brake', q: 'less-brake',
-    d: 'doors', h: 'horn', a: 'auto', t: 'compression',
+    d: 'doors', h: 'horn', a: 'auto', t: 'compression', p: 'pause',
   };
-  for (const [id, action] of Object.entries(actions)) element(id).addEventListener('click', action);
+  for (const [id, action] of Object.entries(actions)) {
+    element(id).addEventListener('click', () => { dirty = true; action(); });
+  }
   window.addEventListener('keydown', event => {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     const id = keys[event.key.toLowerCase()];
     if (!id) return;
     event.preventDefault();
     if (event.repeat && !['more-power', 'less-power', 'more-brake', 'less-brake'].includes(id)) return;
+    dirty = true;
     actions[id]();
   });
   renderer.domElement.addEventListener('pointerdown', event => renderer.domElement.setPointerCapture(event.pointerId));
   renderer.domElement.addEventListener('pointermove', event => {
-    if (event.buttons & 1) cameras.drag(event.movementX, event.movementY);
+    if (event.buttons & 1) {
+      cameras.drag(event.movementX, event.movementY);
+      dirty = true;
+    }
   });
   renderer.domElement.addEventListener('wheel', event => {
     event.preventDefault();
     cameras.zoom(event.deltaY);
+    dirty = true;
   }, { passive: false });
 
   const speed = element('speed');
   const limit = element('limit');
   const nextStop = element('next-stop');
+  const signal = element('signal');
+  const mappedSignals = data.features.filter(feature => feature.type === 'signal' && feature.chainage !== undefined);
   const clock = element('clock');
   const throttle = element<HTMLMeterElement>('power');
   const brake = element<HTMLMeterElement>('brake');
   let previous = performance.now();
   let nextHud = previous;
+  let previousReversals = service.reversals;
   function frame(now: number): void {
     const frameStart = audit ? performance.now() : 0;
     const elapsed = Math.min(0.1, Math.max(0, (now - previous) / 1000));
     previous = now;
-    const state = service.tick(elapsed * timeScale);
-    place(cab.group, state.distance);
-    const visual = { ...service.controls, speed: state.speed, night, deltaSeconds: elapsed };
+    if (paused && !dirty && cameras.settled) {
+      requestAnimationFrame(frame);
+      return;
+    }
+    dirty = false;
+    const state = paused ? service.state : service.tick(elapsed * timeScale);
+    if (!paused) traffic?.update(state.elapsed, elapsed * timeScale);
+    const chainage = service.chainage();
+    if (service.reversals !== previousReversals) {
+      cameras.relocate();
+      previousReversals = service.reversals;
+    }
+    place(cab.group, chainage);
+    const inTunnel = service.trackSpan.tunnel;
+    const visual = { ...service.controls, speed: state.speed, night: night || inTunnel, deltaSeconds: elapsed };
     cab.update(visual);
     cab.group.visible = cameras.view === 'cab';
-    coaches.forEach((coach, index) => {
-      const distance = state.distance - index * 24.6;
-      place(coach.group, distance);
-      inverse.copy(coach.group.quaternion).invert();
-      coach.bogies.forEach((bogie, axle) => {
-        const pose = rail.pose(distance + (axle === 0 ? 8.3 : -8.3), 2);
-        bogie.position.copy(pose.position).sub(coach.group.position).applyQuaternion(inverse);
-        matrix.lookAt(pose.position, pose.position.clone().add(pose.tangent), up);
-        bogie.quaternion.setFromRotationMatrix(matrix).premultiply(inverse);
-      });
-      coach.group.visible = index > 0 || cameras.view !== 'cab';
-      coach.update(visual);
-    });
+    placeConsist(coaches, service, elapsed, cameras.view === 'cab');
+    if (traffic) {
+      const visible = new Set<string>();
+      for (const movement of traffic.active) {
+        if (Math.abs(movement.chainage() - chainage) > 1600) continue;
+        visible.add(movement.id);
+        let consist = trafficModels.get(movement.id);
+        if (!consist) {
+          consist = [createTrain(true, steel), createTrain(false, steel), createTrain(true, steel)];
+          trafficModels.set(movement.id, consist);
+          scene.add(...consist.map(coach => coach.group));
+        }
+        placeConsist(consist, movement, elapsed, false);
+      }
+      for (const [id, consist] of trafficModels) {
+        if (!visible.has(id)) consist.forEach(coach => { coach.group.visible = false; });
+      }
+    }
     cameras.update(cab.group, cab.eye, elapsed);
-    atmosphere.update(cab.group.position, cameras.camera.position, elapsed);
-    scenery.update(elapsed);
+    overview?.update(cameras.view === 'map', Math.max(0, cameras.camera.position.y - cab.group.position.y), cameras.camera.position);
+    const visualTime = paused ? 0 : elapsed;
+    atmosphere.update(cab.group.position, cameras.camera.position, visualTime,
+      inTunnel && cameras.view === 'cab');
+    scenery.update(visualTime, cameras.camera.position, chainage);
     renderer.render(scene, cameras.camera);
-    if (now >= nextHud) {
+    if (now >= nextHud || paused) {
       world.dataset.stage = 'running';
       if (cameras.settled) world.dataset.view = cameras.view;
-      world.dataset.chainage = state.distance.toFixed(2);
+      world.dataset.chainage = chainage.toFixed(2);
       world.dataset.structure = service.trackSpan.tunnel ? 'tunnel' : service.trackSpan.bridge ? 'bridge' : 'open';
       const station = service.nextStop;
-      const remaining = station ? station.stopDistance - state.distance : 0;
+      const remaining = station ? station.stopDistance - chainage : 0;
       speed.textContent = String(Math.round(state.speed * 3.6));
       limit.textContent = String(service.trackSpan.speedLimit ?? '—');
-      const planned = data.timetable && station ? ` · ${data.timetable.arrival.slice(0, 5)}` : '';
+      const authority = service.authority;
+      let upcoming = '';
+      for (const feature of mappedSignals) {
+        const chainage = feature.chainage!;
+        const direction = feature.facesService ? 1 : -1;
+        const arriving = chainage === authority.boundary && feature.facesService;
+        const displayed = service.blocks.aspect(arriving ? 'player' : 'next-train', chainage - direction * 0.01, direction);
+        scenery.setSignal(displayed.aspect, feature.osmId);
+        if (chainage === authority.boundary && feature.facesService) {
+          const label = feature.tags.ref ?? 'Signal';
+          upcoming = `${label} · ${authority.aspect} · ${Math.max(0, Math.round(chainage - service.chainage()))} m`;
+        }
+      }
+      signal.textContent = upcoming;
+      signal.dataset.aspect = authority.aspect;
+      const arrivalPlan = data.timetable?.calls?.[service.nextIndex]?.arrival ?? data.timetable?.arrival;
+      const planned = arrivalPlan && station ? ` · ${arrivalPlan.slice(0, 5)}` : '';
       nextStop.textContent = station ? `${station.name} · ${Math.max(0, Math.round(remaining))} m${planned}` : 'Service complete';
       const seconds = Math.floor(state.elapsed) + departure;
       clock.textContent = new Date(seconds * 1000).toISOString().slice(11, 19);
@@ -240,7 +377,7 @@ async function run(): Promise<void> {
           : remaining < -7 ? 'Stop missed' : '';
       nextHud = now + 100;
     }
-    if (audit) {
+    if (audit && !paused) {
       performance.measure('station-frame', { start: frameStart, end: performance.now() });
       performance.clearMeasures('station-frame');
     }

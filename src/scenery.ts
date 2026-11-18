@@ -5,12 +5,13 @@ import {
   Color,
   CylinderGeometry,
   DoubleSide,
-  Euler,
   Float32BufferAttribute,
   Group,
   InstancedMesh,
   Mesh,
+  MeshLambertMaterial,
   MeshStandardMaterial,
+  Matrix4,
   Object3D,
   PointLight,
   Quaternion,
@@ -21,9 +22,9 @@ import {
   Vector2,
   Vector3,
 } from 'three';
-import type { Intersection } from 'three';
+import type { Intersection, Material, Texture } from 'three';
 import type { Rail } from './rail';
-import { groundHeight, type LocalPoint, type TrackSpan, type WorldData } from './world-data';
+import { groundHeight, type LocalPoint, type TrackSpan, type WorldData } from './world-data.ts';
 
 type Weather = 'clear' | 'rain' | 'snow';
 type Transform = {
@@ -78,7 +79,7 @@ function texture(size: number, draw: (context: CanvasRenderingContext2D) => void
   return map;
 }
 
-function aggregate(geometry: BufferGeometry, surface: MeshStandardMaterial, values: Transform[]) {
+function aggregate(geometry: BufferGeometry, surface: Material, values: Transform[]) {
   const mesh = new InstancedMesh(geometry, surface, values.length);
   const dummy = new Object3D();
   values.forEach((entry, index) => {
@@ -209,6 +210,48 @@ function routeIndex(rail: Rail, spans: TrackSpan[]) {
   };
 }
 
+function forestCover(data: WorldData) {
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Canvas 2D is required for the OSM forest mask');
+  const { east, north, width, height, spacing } = data.terrain;
+  const xScale = (size - 1) / ((width - 1) * spacing);
+  const zScale = (size - 1) / ((height - 1) * spacing);
+  for (const feature of data.features) {
+    if (feature.type !== 'forest') continue;
+    context.beginPath();
+    for (const ring of [feature.points, ...(feature.holes ?? [])]) {
+      ring.forEach(([x, y], index) => {
+        const imageX = (x - east) * xScale;
+        const imageY = (north - y) * zScale;
+        if (index === 0) context.moveTo(imageX, imageY);
+        else context.lineTo(imageX, imageY);
+      });
+      context.closePath();
+    }
+    context.fill('evenodd');
+  }
+  const { data: pixels } = context.getImageData(0, 0, size, size);
+  return (x: number, z: number) => {
+    const column = Math.round(Math.max(0, Math.min(size - 1, (x - east) * xScale)));
+    const row = Math.round(Math.max(0, Math.min(size - 1, (z + north) * zScale)));
+    return pixels[(row * size + column) * 4 + 3] / 255;
+  };
+}
+
+function gradedHeight(data: WorldData, nearby: ReturnType<typeof routeIndex>, x: number, z: number) {
+  const source = elevationAt(data, x, z);
+  const track = nearby(x, z);
+  if (!track || track.span.bridge) return source;
+  const mix = track.span.tunnel
+    ? smoothstep((8 - track.distance) / 5) * (1 - smoothstep((track.portalDistance - 5) / 5))
+    : smoothstep((15 - track.distance) / 12);
+  const trackbed = track.height - 0.33;
+  return source + (trackbed - source) * mix;
+}
+
 function createTerrain(
   data: WorldData,
   nearby: ReturnType<typeof routeIndex>,
@@ -219,19 +262,12 @@ function createTerrain(
   const tileCells = 18;
   const { terrain } = data;
   const { width, height, spacing, east, north } = terrain;
-  const grade = (x: number, z: number) => {
-    const source = elevationAt(data, x, z);
-    const track = nearby(x, z);
-    if (!track || track.span.bridge) return source;
-    const mix = track.span.tunnel
-      ? smoothstep((8 - track.distance) / 5) * (1 - smoothstep((track.portalDistance - 5) / 5))
-      : smoothstep((15 - track.distance) / 12);
-    const trackbed = track.height - 0.33;
-    return source + (trackbed - source) * mix;
-  };
-  const grass = new Color(0x596237);
-  const rock = new Color(0x77736a);
-  const lowland = new Color(0x73805a);
+  const grade = (x: number, z: number) => gradedHeight(data, nearby, x, z);
+  const grass = new Color(0xb8bd90);
+  const rock = new Color(0xc1b4a5);
+  const lowland = new Color(0xd4d7aa);
+  const spruceShade = new Color(0x5e7755);
+  const cover = forestCover(data);
   const soil = new Color();
   const fine = 4;
   const columns = width - 1;
@@ -293,6 +329,7 @@ function createTerrain(
         const field = Math.sin(worldX * 0.029 + Math.sin(worldZ * 0.008)) *
           Math.cos(worldZ * 0.034 - Math.sin(worldX * 0.017));
         soil.copy(grass).lerp(lowland, 0.45 + field * 0.35).lerp(rock, smoothstep((slope - 4) / 19));
+        soil.lerp(spruceShade, cover(worldX, worldZ) * 0.7);
         colors.push(soil.r, soil.g, soil.b);
         cached.set(key, index);
         return index;
@@ -674,7 +711,15 @@ function addParallelTracks(
   if (wires.length) group.add(aggregate(box, material(0x363e38, 0.61, 0.66), wires));
 }
 
-type BuildingBatches = { walls: number[]; wallIndices: number[]; colors: number[]; roofs: number[]; roofIndices: number[] };
+type BuildingBatches = {
+  walls: number[];
+  wallIndices: number[];
+  wallUv: number[];
+  colors: number[];
+  roofs: number[];
+  roofIndices: number[];
+  roofUv: number[];
+};
 
 function appendWall(
   batches: BuildingBatches,
@@ -686,6 +731,9 @@ function appendWall(
 ) {
   const index = batches.walls.length / 3;
   batches.walls.push(a[0], base, -a[1], b[0], base, -b[1], a[0], height, -a[1], b[0], height, -b[1]);
+  const u = Math.hypot(b[0] - a[0], b[1] - a[1]) / 1.8;
+  const v = (height - base) / 2.8;
+  batches.wallUv.push(0, 0, u, 0, 0, v, u, v);
   for (let corner = 0; corner < 4; corner++) batches.colors.push(color.r, color.g, color.b);
   batches.wallIndices.push(index, index + 1, index + 2, index + 1, index + 3, index + 2);
 }
@@ -697,8 +745,14 @@ function appendRoof(batches: BuildingBatches, points: LocalPoint[], height: numb
     centroid[0] + (x - centroid[0]) * 0.58,
     centroid[1] + (y - centroid[1]) * 0.58,
   ]);
-  for (const [x, y] of points) batches.roofs.push(x, height, -y);
-  for (const [x, y] of inner) batches.roofs.push(x, height + rise, -y);
+  for (const [x, y] of points) {
+    batches.roofs.push(x, height, -y);
+    batches.roofUv.push(x / 2.7, y / 2.7);
+  }
+  for (const [x, y] of inner) {
+    batches.roofs.push(x, height + rise, -y);
+    batches.roofUv.push(x / 2.7, y / 2.7);
+  }
   for (let outward = 0; outward < points.length; outward++) {
     const next = (outward + 1) % points.length;
     const a = index + outward;
@@ -713,14 +767,16 @@ function addBuildings(
   data: WorldData,
   windowsSurface: MeshStandardMaterial,
   roofsSurface: MeshStandardMaterial,
+  siding?: Texture,
 ) {
   const facade = material(0xffffff);
+  facade.map = siding ?? null;
   facade.vertexColors = true;
   facade.side = DoubleSide;
   roofsSurface.side = DoubleSide;
   const buildingWindows: Transform[] = [];
   const frames: Transform[] = [];
-  const batches: BuildingBatches = { walls: [], wallIndices: [], colors: [], roofs: [], roofIndices: [] };
+  const batches: BuildingBatches = { walls: [], wallIndices: [], wallUv: [], colors: [], roofs: [], roofIndices: [], roofUv: [] };
   const paint = [0xb97b57, 0xe0d0b1, 0xbfc3b6, 0x9b5542, 0xaaa8a0, 0xb38d69, 0xe6d7c6];
 
   for (const feature of data.features) {
@@ -736,7 +792,9 @@ function addBuildings(
     const levels = Number.parseFloat(feature.tags['building:levels'] ?? '') || 1 + Math.floor(random() * 2);
     const structureHeight = taggedHeight > 1 ? taggedHeight : 2.75 * levels;
     const height = ground + structureHeight;
-    const color = new Color(paint[Math.floor(random() * paint.length)]);
+    const taggedColor = feature.tags['building:colour'];
+    const color = new Color(taggedColor && /^#[0-9a-f]{6}$/i.test(taggedColor)
+      ? taggedColor : paint[Math.floor(random() * paint.length)]);
     const shed = feature.tags.building === 'shed' || feature.tags.building === 'garage';
     const roofRise = feature.tags['roof:shape'] === 'flat' || outline.length > 10 ? 0.15 : Math.min(1.9, structureHeight * 0.23);
 
@@ -773,8 +831,10 @@ function addBuildings(
   }
 
   if (batches.walls.length) {
-    const walls = mesh(batches.walls, batches.wallIndices, facade, batches.colors);
-    const roof = mesh(batches.roofs, batches.roofIndices, roofsSurface);
+    const walls = mesh(batches.walls, batches.wallIndices, facade, batches.colors, batches.wallUv);
+    const roof = mesh(batches.roofs, batches.roofIndices, roofsSurface, undefined, batches.roofUv);
+    walls.name = 'OSM building walls';
+    roof.name = 'OSM building roofs';
     walls.castShadow = roof.castShadow = true;
     group.add(walls, roof);
   }
@@ -820,7 +880,7 @@ function addPlatforms(
     platforms.push({ outline, level });
     const surface = outline.flatMap(([x, y]) => [x, level, -y]);
     const top = mesh(surface, triangles(outline), topMaterial);
-    const trim: BuildingBatches = { walls: [], wallIndices: [], colors: [], roofs: [], roofIndices: [] };
+    const trim: BuildingBatches = { walls: [], wallIndices: [], wallUv: [], colors: [], roofs: [], roofIndices: [], roofUv: [] };
     const grey = new Color(0xffffff);
     for (let index = 0; index < outline.length; index++) {
       const a = outline[index];
@@ -1097,27 +1157,31 @@ function spruceTexture() {
   });
 }
 
-function distantSpruceTexture(branches: CanvasTexture) {
+function distantSpruceTexture(branches: CanvasTexture, spruce?: Texture) {
   const spray = branches.image as CanvasImageSource;
   return texture(512, (context) => {
     const random = generator(20799);
-    context.fillStyle = '#594f3d';
-    context.beginPath();
-    context.moveTo(122, 251);
-    context.lineTo(132, 251);
-    context.lineTo(130, 16);
-    context.lineTo(126, 16);
-    context.fill();
-    for (let level = 0; level <= 12; level++) {
-      const fraction = level / 12;
-      const width = 84 * (1 - fraction) ** 0.77 + 5;
-      for (const side of [-1, 1]) {
-        context.save();
-        context.translate(128, 213 - 187 * fraction);
-        context.scale(side, 1);
-        context.rotate(0.16 + random() * 0.25);
-        context.drawImage(spray, 0, -22, width * (0.77 + random() * 0.34), 46 - 25 * fraction);
-        context.restore();
+    if (spruce) {
+      context.drawImage(spruce.image as CanvasImageSource, 1, 1, 254, 254);
+    } else {
+      context.fillStyle = '#594f3d';
+      context.beginPath();
+      context.moveTo(122, 251);
+      context.lineTo(132, 251);
+      context.lineTo(130, 16);
+      context.lineTo(126, 16);
+      context.fill();
+      for (let level = 0; level <= 12; level++) {
+        const fraction = level / 12;
+        const width = 84 * (1 - fraction) ** 0.77 + 5;
+        for (const side of [-1, 1]) {
+          context.save();
+          context.translate(128, 213 - 187 * fraction);
+          context.scale(side, 1);
+          context.rotate(0.16 + random() * 0.25);
+          context.drawImage(spray, 0, -22, width * (0.77 + random() * 0.34), 46 - 25 * fraction);
+          context.restore();
+        }
       }
     }
     context.save();
@@ -1157,7 +1221,7 @@ function addForests(
   data: WorldData,
   nearby: ReturnType<typeof routeIndex>,
   foliage: MeshStandardMaterial,
-  distantFoliage: MeshStandardMaterial,
+  distantFoliage: MeshLambertMaterial,
 ) {
   type ForestTile = { near: Transform[]; far: Transform[]; trunks: Transform[] };
   const tileSize = 320;
@@ -1233,59 +1297,175 @@ function addForests(
   }
 }
 
-function addSignals(group: Group, data: WorldData) {
+type SignalAspect = 'clear' | 'approach' | 'stop';
+
+function addSignals(
+  group: Group,
+  data: WorldData,
+  nearest: ReturnType<typeof routeIndex>,
+) {
   const poles: Transform[] = [];
   const housing: Transform[] = [];
-  const lenses: Transform[] = [];
-  const lens = material(0x8c9a72, 0.27);
-  lens.emissive.setHex(0x9fbc75);
-  lens.emissiveIntensity = 0.25;
+  const lamps = new Map<number, MeshStandardMaterial>();
+  const sides = data.features.filter(item => item.type === 'track');
+  const distanceToTrack = (x: number, z: number) => {
+    let clearance = nearest(x, z)?.distance ?? 30;
+    for (const side of sides) {
+      for (let index = 1; index < side.points.length; index++) {
+        const [x0, y0] = side.points[index - 1];
+        const [x1, y1] = side.points[index];
+        const dx = x1 - x0;
+        const dz = y0 - y1;
+        const length = dx * dx + dz * dz;
+        if (length === 0) continue;
+        const portion = Math.max(0, Math.min(1, ((x - x0) * dx + (z + y0) * dz) / length));
+        clearance = Math.min(clearance, Math.hypot(x - x0 - dx * portion, z + y0 - dz * portion));
+      }
+    }
+    return clearance;
+  };
+  const lensGeometry = new CylinderGeometry(0.086, 0.086, 0.031, 16);
+  const matrix = new Matrix4();
+  const towardDriver = new Vector3();
   for (const feature of data.features) {
     if (feature.type !== 'signal' || !feature.points.length) continue;
     const point = feature.points[0];
-    const foot = coordinate(point, elevationAt(data, point[0], -point[1]));
-    const top = foot.clone().add(new Vector3(0, 3.5, 0));
-    poles.push(beam(foot, top, 0.13));
-    housing.push({ position: top, scale: new Vector3(0.42, 0.67, 0.24) });
-    for (const z of [-0.128, 0.128]) {
-      lenses.push({
-        position: top.clone().add(new Vector3(0, -0.13, z)),
-        scale: new Vector3(0.15, 0.05, 0.15),
-        rotation: new Quaternion().setFromEuler(new Euler(Math.PI / 2, 0, 0)),
-      });
+    const [east, north] = feature.heading ?? [0, 0];
+    const heading = new Vector3(east, 0, -north).normalize();
+    const foot = coordinate(point, 0);
+    if (heading.lengthSq() > 0) {
+      const side = new Vector3().crossVectors(heading, UP).multiplyScalar(2.85);
+      const right = foot.clone().add(side);
+      const left = foot.clone().sub(side);
+      foot.copy(distanceToTrack(right.x, right.z) >= distanceToTrack(left.x, left.z) ? right : left);
     }
+    foot.y = elevationAt(data, foot.x, foot.z);
+    const top = foot.clone().add(new Vector3(0, 3.5, 0));
+    const direction = heading.lengthSq() > 0 ? heading : new Vector3(0, 0, -1);
+    towardDriver.copy(top).sub(direction);
+    const attitude = new Quaternion().setFromRotationMatrix(matrix.lookAt(towardDriver, top, UP));
+    poles.push(beam(foot, top, 0.13));
+    housing.push({ position: top, scale: new Vector3(0.42, 0.67, 0.24), rotation: attitude });
+
+    const lampMaterial = material(0x46564a, 0.27);
+    lampMaterial.emissiveIntensity = 0.4;
+    const lamp = new Mesh(lensGeometry, lampMaterial);
+    lamp.position.copy(top).addScaledVector(direction, -0.135);
+    lamp.position.y -= 0.10;
+    lamp.quaternion.setFromUnitVectors(UP, direction);
+    lamp.name = 'Railway signal';
+    lamps.set(feature.osmId, lampMaterial);
+    group.add(lamp);
   }
   if (poles.length) {
     const box = new BoxGeometry();
-    group.add(
-      aggregate(box, material(0x7f8278, 0.69, 0.55), poles),
-      aggregate(box, material(0x252927, 0.77), housing),
-      aggregate(new CylinderGeometry(0.5, 0.5, 1, 12), lens, lenses),
-    );
+    const bases = aggregate(box, material(0x7f8278, 0.69, 0.55), poles);
+    const heads = aggregate(box, material(0x252927, 0.77), housing);
+    bases.name = heads.name = 'Railway signal';
+    group.add(bases, heads);
   }
+  const palette = { clear: 0x78ef8a, approach: 0xf7bf55, stop: 0xfa4841 };
+  return (aspect: SignalAspect, osmId: number) => {
+    const lamp = lamps.get(osmId);
+    if (!lamp) return;
+    lamp.emissive.setHex(palette[aspect]);
+    lamp.emissiveIntensity = 1.6;
+  };
 }
 
-function coatedBySnow(base: MeshStandardMaterial, strength: number, branchCanopy = false) {
+function coatedBySnow(base: MeshStandardMaterial | MeshLambertMaterial, strength: number, branchCanopy = false) {
   const coverage = { value: 0 };
   base.onBeforeCompile = (shader) => {
     shader.uniforms.snowCoverage = coverage;
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\nuniform float snowCoverage;')
-      .replace('#include <roughnessmap_fragment>', `
-        #include <roughnessmap_fragment>
+      .replace('#include <alphatest_fragment>', `
+        #include <alphatest_fragment>
         float cover = snowCoverage * ${strength.toFixed(2)};
-        vec3 powder = vec3(0.74, 0.80, 0.83);
-        #ifdef USE_MAP
-          vec3 grain = texture2D(map, vMapUv).rgb;
-          powder *= 0.87 + 0.28 * grain.g;
-          ${branchCanopy ? 'cover *= 0.55 + 0.45 * smoothstep(0.1, 0.39, grain.g);' : ''}
-        #endif
-        diffuseColor.rgb = mix(diffuseColor.rgb, powder, cover);
-        roughnessFactor = mix(roughnessFactor, 0.91, cover);
+        if (cover > 0.001) {
+          vec3 powder = vec3(0.74, 0.80, 0.83);
+          #ifdef USE_MAP
+            vec3 grain = texture2D(map, vMapUv).rgb;
+            powder *= 0.87 + 0.28 * grain.g;
+            ${branchCanopy ? 'cover *= 0.55 + 0.45 * smoothstep(0.1, 0.39, grain.g);' : ''}
+          #endif
+          diffuseColor.rgb = mix(diffuseColor.rgb, powder, cover);
+        }
       `);
+    if (base instanceof MeshStandardMaterial) {
+      shader.fragmentShader = shader.fragmentShader.replace('#include <roughnessmap_fragment>',
+        '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.91, cover);');
+    }
   };
-  base.customProgramCacheKey = () => `snow-${strength}-${branchCanopy}`;
+  base.customProgramCacheKey = () => `snow-${base.type}-${strength}-${branchCanopy}`;
   return coverage;
+}
+
+function addTracksideGrass(group: Group, data: WorldData, rail: Rail, nearby: ReturnType<typeof routeIndex>) {
+  const random = generator(19217);
+  const vertices: number[] = [];
+  const faces: number[] = [];
+  for (let index = 0; index < 12; index++) {
+    const angle = random() * Math.PI * 2;
+    const width = 0.012 + random() * 0.015;
+    const height = 0.18 + random() * 0.35;
+    const x = (random() - 0.5) * 0.27;
+    const z = (random() - 0.5) * 0.27;
+    const dx = Math.cos(angle);
+    const dz = Math.sin(angle);
+    const base = vertices.length / 3;
+    vertices.push(x - dz * width, 0, z + dx * width, x + dz * width, 0, z - dx * width,
+      x + dx * height * 0.15, height * 0.64, z + dz * height * 0.15,
+      x + dx * height * 0.41, height, z + dz * height * 0.41);
+    faces.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new Float32BufferAttribute(vertices, 3));
+  geometry.setIndex(faces);
+  geometry.computeVertexNormals();
+  const verge = material(0x89965a);
+  verge.side = DoubleSide;
+  const tileGroups = new Map<number, Transform[]>();
+  const excluded = data.features.filter(feature => ['water', 'building', 'platform'].includes(feature.type))
+    .map(feature => {
+      const points = polygon(feature.points);
+      const east = points.map(point => point[0]);
+      const north = points.map(point => point[1]);
+      return { points, left: Math.min(...east), right: Math.max(...east),
+        bottom: Math.min(...north), top: Math.max(...north) };
+    });
+  for (const span of data.spans) {
+    if (span.bridge || span.tunnel) continue;
+    for (let distance = span.start + 0.5; distance < span.end; distance += 0.95 + random() * 1.25) {
+      const { position, tangent } = rail.pose(distance);
+      const axis = tangent.cross(UP).normalize();
+      for (const side of [-1, 1]) {
+        const base = position.clone().addScaledVector(axis, side * (2.85 + random() * 2.2));
+        if (excluded.some(({ points, left, right, bottom, top }) => base.x >= left &&
+          base.x <= right && -base.z >= bottom && -base.z <= top && inside([base.x, -base.z], points))) continue;
+        base.y = gradedHeight(data, nearby, base.x, base.z) - 0.09;
+        const scale = 0.55 + random() * 0.6;
+        const rotation = new Quaternion().setFromAxisAngle(UP, random() * 2 * Math.PI);
+        const tile = Math.floor(distance / 120);
+        if (!tileGroups.has(tile)) tileGroups.set(tile, []);
+        tileGroups.get(tile)?.push({ position: base, rotation, scale: new Vector3(scale, scale, scale),
+          color: new Color().setRGB(0.75 + random() * 0.25, 0.72 + random() * 0.26, 0.66) });
+      }
+    }
+  }
+  const tiles = [...tileGroups.values()].map(entries => {
+    const patch = aggregate(geometry, verge, entries);
+    patch.name = 'Ballast shoulder grasses';
+    patch.receiveShadow = false;
+    group.add(patch);
+    return patch;
+  });
+  return {
+    material: verge,
+    applyDistance(camera: Vector3) {
+      for (const patch of tiles) patch.visible = camera.distanceToSquared(patch.boundingSphere!.center) < 205 ** 2;
+    },
+  };
 }
 
 function groundTexture(gravel: boolean) {
@@ -1335,18 +1515,36 @@ function waterNormals() {
   return result;
 }
 
-export function createScenery(data: WorldData, rail: Rail) {
+export interface SceneryMaps {
+  grass?: Texture;
+  ballast?: Texture;
+  spruce?: Texture;
+  siding?: Texture;
+  roofing?: Texture;
+}
+
+export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {}) {
   const group = new Group();
   group.name = 'OpenStreetMap railway corridor';
   const ground = material(0xffffff, 0.95);
   ground.vertexColors = true;
-  ground.map = groundTexture(false);
-  const ballast = material(0x888176, 0.97);
-  ballast.map = groundTexture(true);
+  ground.map = maps.grass ?? groundTexture(false);
+  ground.bumpMap = ground.map;
+  ground.bumpScale = 0.035;
+  const distantGround = new MeshLambertMaterial({
+    color: 0xffffff,
+    vertexColors: true,
+    map: ground.map,
+  });
+  const ballast = material(0xc1b7aa, 0.97);
+  ballast.map = maps.ballast ?? groundTexture(true);
   ballast.bumpMap = ballast.map;
   ballast.bumpScale = 0.05;
   const concrete = material(0x8a8880, 0.86);
-  const roofs = material(0x4b484a, 0.81);
+  const roofs = material(maps.roofing ? 0xc9c0bb : 0x4b484a, 0.81);
+  roofs.map = maps.roofing ?? null;
+  roofs.bumpMap = roofs.map;
+  roofs.bumpScale = 0.04;
   const foliage = material(0xabbda2, 0.91);
   foliage.side = DoubleSide;
   foliage.vertexColors = true;
@@ -1354,31 +1552,36 @@ export function createScenery(data: WorldData, rail: Rail) {
   foliage.map = spruceAlbedo;
   foliage.alphaTest = 0.36;
   foliage.alphaToCoverage = true;
-  const distantFoliage = material(0xa6bb9d, 0.94);
-  distantFoliage.side = DoubleSide;
-  distantFoliage.map = distantSpruceTexture(spruceAlbedo);
-  distantFoliage.alphaTest = 0.36;
+  const distantFoliage = new MeshLambertMaterial({
+    color: 0xa6bb9d,
+    side: DoubleSide,
+    map: distantSpruceTexture(spruceAlbedo, maps.spruce),
+    alphaTest: 0.36,
+  });
   const windows = material(0x46565b, 0.36, 0.25);
   windows.emissive.setHex(0xffb75b);
   const fixtures = material(0xf0d2a4, 0.57);
   fixtures.emissive.setHex(0xffc581);
-  const water = material(0x446978, 0.2, 0.43);
+  const water = material(0x365762, 0.19, 0.05);
   water.side = DoubleSide;
   water.normalMap = waterNormals();
-  water.normalScale.set(0.49, 0.64);
+  water.normalScale.set(0.22, 0.28);
   water.envMapIntensity = 1.15;
 
-  const snow = [coatedBySnow(ground, 0.92), coatedBySnow(ballast, 0.57),
+  const snow = [coatedBySnow(ground, 0.92), coatedBySnow(distantGround, 0.92), coatedBySnow(ballast, 0.57),
     coatedBySnow(foliage, 0.64, true), coatedBySnow(distantFoliage, 0.64, true),
     coatedBySnow(roofs, 0.87), coatedBySnow(concrete, 0.29)];
   const nearby = routeIndex(rail, data.spans);
-  group.add(createTerrain(data, nearby, ground));
+  const terrain = createTerrain(data, nearby, ground);
+  const terrainTiles = terrain.children.filter(tile => tile instanceof Mesh);
+  group.add(terrain);
   addTrack(group, data, rail, ballast, concrete);
   addParallelTracks(group, data, nearby, ballast);
   addWater(group, data, water);
-  addBuildings(group, data, windows, roofs);
+  addBuildings(group, data, windows, roofs, maps.siding);
   addForests(group, data, nearby, foliage, distantFoliage);
-  addSignals(group, data);
+  const grass = addTracksideGrass(group, data, rail, nearby);
+  const setSignal = addSignals(group, data, nearby);
   const bulbs = addPlatforms(group, data, rail, concrete, fixtures);
   group.traverse(object => {
     object.updateMatrix();
@@ -1386,31 +1589,41 @@ export function createScenery(data: WorldData, rail: Rail) {
   });
 
   const setWeather = (weather: Weather) => {
+    grass.material.color.setHex(weather === 'snow' ? 0xa6ac91 : 0x89965a);
     for (const amount of snow) amount.value = weather === 'snow' ? 1 : 0;
     ground.roughness = weather === 'rain' ? 0.63 : 0.95;
     ballast.roughness = weather === 'rain' ? 0.66 : 0.97;
     roofs.roughness = weather === 'rain' ? 0.42 : 0.81;
     water.roughness = weather === 'rain' ? 0.33 : 0.2;
-    if (weather === 'rain') ground.color.setHex(0xb0b5af);
-    else ground.color.setHex(0xffffff);
+    ground.color.setHex(weather === 'rain' ? 0xb0b5af : 0xffffff);
+    distantGround.color.copy(ground.color);
   };
+  let nightLighting = false;
   const setNight = (night: boolean) => {
+    nightLighting = night;
     windows.emissiveIntensity = night ? 0.72 : 0;
     fixtures.emissiveIntensity = night ? 2.4 : 0;
     for (const bulb of bulbs) {
-      bulb.visible = night;
+      bulb.visible = false;
       bulb.intensity = night ? 31 : 0;
     }
-    water.color.setHex(night ? 0x2d485a : 0x446978);
+    water.color.setHex(night ? 0x20354b : 0x365762);
   };
   let waterTime = 0;
-  const update = (seconds: number) => {
+  const update = (seconds: number, camera: Vector3) => {
+    grass.applyDistance(camera);
+    for (const tile of terrainTiles) {
+      const center = tile.geometry.boundingSphere?.center;
+      const detailed = center && camera.distanceToSquared(center) <= 390 ** 2;
+      tile.material = detailed ? ground : distantGround;
+    }
+    for (const bulb of bulbs) bulb.visible = nightLighting && bulb.position.distanceToSquared(camera) < 105 ** 2;
     waterTime += seconds;
     water.normalMap?.offset.set((waterTime * 0.016) % 1, (waterTime * 0.010) % 1);
   };
   setNight(false);
 
-  return { group, setWeather, setNight, update };
+  return { group, setWeather, setNight, setSignal, update };
 }
 
 
@@ -1471,6 +1684,51 @@ export function auditTrackbed(
         if (gap > result.maxGap) {
           result.maxGap = gap;
           result.worstLocation = { distance, lateral };
+        }
+      }
+    }
+  }
+  return result;
+}
+
+
+export function auditVehicleClearance(group: Group, rail: Rail, spacing = 2) {
+  if (!Number.isFinite(spacing) || spacing <= 0) throw new Error('Positive clearance sample spacing is required');
+  const terrain = group.getObjectByName('Graded Copernicus DEM');
+  if (!terrain) throw new Error('The scene is missing rendered terrain');
+  const structures = new Set(['Tunnel portal', 'Tunnel bore', 'OSM building walls', 'OSM building roofs', 'Railway signal']);
+  const obstacles = [...terrain.children, ...group.children.filter(object => structures.has(object.name))];
+  const hits: Intersection[] = [];
+  const direction = new Vector3();
+  const body = new Vector3();
+  const origin = new Vector3();
+  const axial = new Vector3(0, 0, 1);
+  const downward = new Vector3(0, -1, 0);
+  const bodyAttitude = new Quaternion();
+  const cant = new Quaternion();
+  const matrix = new Matrix4();
+  const ray = new Raycaster();
+  ray.far = 3.4;
+  const result = { samples: 0, intersections: 0, first: null as null | { distance: number; object: string } };
+  group.updateWorldMatrix(true, true);
+
+  for (let distance = 12; distance < rail.length - 12; distance += spacing) {
+    const front = rail.position(distance + 8.3);
+    const rear = rail.position(distance - 8.3);
+    body.copy(front).lerp(rear, 0.5);
+    bodyAttitude.setFromRotationMatrix(matrix.lookAt(rear, front, UP));
+    bodyAttitude.multiply(cant.setFromAxisAngle(axial, rail.pose(distance, 6).cant));
+    direction.copy(downward).applyQuaternion(bodyAttitude);
+    for (const length of [-11.8, -8, 0, 8, 11.8]) {
+      for (const side of [-1.45, 0, 1.45]) {
+        origin.set(side, 4.14, length).applyQuaternion(bodyAttitude).add(body);
+        ray.set(origin, direction);
+        hits.length = 0;
+        ray.intersectObjects(obstacles, false, hits);
+        result.samples++;
+        if (hits.length) {
+          result.intersections++;
+          result.first ??= { distance, object: hits[0].object.name || 'terrain' };
         }
       }
     }

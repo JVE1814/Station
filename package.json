@@ -12,16 +12,19 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "python3 -m unittest discover -s scripts -v && node --test scripts/test-*.mjs",
-    "data": "python3 scripts/bake_pair.py 18567357 432630619 5594658999 public/data/service.json --timetable data/r40-timetable.json",
+    "data": "python3 scripts/build_data.py",
     "verify:browser": "node scripts/check-browser.mjs",
-    "verify:pair": "npm run typecheck && npm run lint && npm test && npm run build && node scripts/verify-world.mjs && npm run verify:browser",
+    "verify:pair": "npm run typecheck && npm run lint && npm test && npm run build && node scripts/verify-world.mjs && node scripts/verify-clearance.mjs && npm run verify:browser",
     "preview": "vite preview",
-    "verify": "npm ci && npm run verify:pair && node scripts/verify-coverage.mjs"
+    "verify": "node scripts/verify.mjs",
+    "data:pair": "python3 scripts/bake_pair.py 18567357 432630619 5594658999 public/data/service.json --timetable data/r40-timetable.json",
+    "drive:browser": "node scripts/drive-browser.mjs"
   },
   "dependencies": {
     "three": "^0.187.0"
   },
   "devDependencies": {
+    "@napi-rs/canvas": "^1.1.1",
     "@types/three": "^0.187.0",
     "eslint": "^10.15.0",
     "playwright-core": "^1.65.1",

@@ -1,4 +1,6 @@
+import type { Texture } from 'three';
 import {
+  AdditiveBlending,
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
@@ -14,6 +16,8 @@ import {
   PointLight,
   SphereGeometry,
   SpotLight,
+  Sprite,
+  SpriteMaterial,
   SRGBColorSpace,
   Vector3,
 } from 'three';
@@ -26,6 +30,7 @@ export interface TrainVisualState {
   brake: number;
   doorsOpen: boolean;
   night: boolean;
+  headlights?: boolean;
   deltaSeconds?: number;
   doorSide?: -1 | 1;
 }
@@ -337,8 +342,16 @@ function noseDetails(body: Group, trim: MeshStandardMaterial) {
     rod(body, trim, 0.014, new Vector3(side * 0.28, 2.93, -11.807), new Vector3(side * 0.45, 3.40, -11.274));
   }
   const lamp = surface(0xffecd1, 0.24, 0.05);
+  const glow = headlampGlow();
+  const halos = [];
   lamp.emissive.setHex(0xffd9a5);
   for (const side of [-1, 1]) {
+    const halo = new Sprite(glow);
+    halo.position.set(side * 0.76, 1.54, -12.11);
+    halo.scale.set(1.42, 1.42, 1);
+    halo.visible = false;
+    halos.push(halo);
+    body.add(halo);
     const housing = new Mesh(new SphereGeometry(0.16, 16, 10), trim);
     housing.scale.set(1.28, 0.68, 0.24);
     housing.position.set(side * 0.76, 1.54, -12.01);
@@ -353,7 +366,26 @@ function noseDetails(body: Group, trim: MeshStandardMaterial) {
   box(body, trim, [0.33, 0.26, 0.43], [0, 0.59, -12]);
   box(body, trim, [0.22, 0.17, 0.35], [0, 0.64, -12.26]);
   const light = trainHeadlight(body);
-  return { lamp, light };
+  return { lamp, light, halos };
+}
+
+function headlampGlow() {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Canvas 2D is required for the headlamp glow');
+  const radial = context.createRadialGradient(32, 32, 0, 32, 32, 32);
+  radial.addColorStop(0, 'rgba(255,243,203,1)');
+  radial.addColorStop(0.10, 'rgba(255,232,186,0.64)');
+  radial.addColorStop(0.34, 'rgba(255,203,140,0.20)');
+  radial.addColorStop(1, 'rgba(255,173,101,0)');
+  context.fillStyle = radial;
+  context.fillRect(0, 0, size, size);
+  const map = new CanvasTexture(canvas);
+  map.colorSpace = SRGBColorSpace;
+  return new SpriteMaterial({ map, blending: AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.74 });
 }
 
 function trainHeadlight(body: Group) {
@@ -365,10 +397,13 @@ function trainHeadlight(body: Group) {
   return light;
 }
 
-export function createTrain(leading = true) {
+export function createTrain(leading = true, brushedSteel?: Texture) {
   const group = new Group();
   const materials = makeTrainMaterials();
   const { siding, paint, underframe, metal, trim } = materials;
+  siding.map = brushedSteel ?? null;
+  siding.bumpMap = brushedSteel ?? null;
+  siding.bumpScale = 0.0015;
   shell(group, [siding, paint, underframe], leading);
   const windowMaterial = surface(0x263744, 0.14, 0.2);
   windowMaterial.emissive.setHex(0xfda655);
@@ -382,8 +417,14 @@ export function createTrain(leading = true) {
   function update(state: TrainVisualState) {
     windowMaterial.emissiveIntensity = state.night ? 0.75 : 0.025;
     if (lights) {
+      const head = state.headlights !== false;
+      lights.lamp.emissive.setHex(head ? 0xffd9a5 : 0xef382b);
       lights.lamp.emissiveIntensity = state.night ? 3.8 : 0.62;
-      lights.light.visible = state.night;
+      lights.light.visible = state.night && head;
+      for (const halo of lights.halos) {
+        halo.material.color.setHex(head ? 0xffffff : 0xec422f);
+        halo.visible = state.night;
+      }
     }
     const fraction = 1 - Math.exp(-5.65 * (state.deltaSeconds ?? (1 / 60)));
     for (const door of doors) {
@@ -527,9 +568,13 @@ function deskLever(group: Group, metal: MeshStandardMaterial, black: MeshStandar
   return assembly;
 }
 
-function makeCabGeometry(group: Group) {
+function makeCabGeometry(group: Group, grain?: Texture) {
   const charcoal = surface(0x2a3338, 0.88, 0.1);
   const dashboard = surface(0x485156, 0.76, 0.09);
+  for (const material of [charcoal, dashboard]) {
+    material.bumpMap = grain ?? null;
+    material.bumpScale = 0.018;
+  }
   const trim = surface(0x10191d, 0.79, 0.12);
   const rubber = surface(0x171e22, 0.92, 0);
   const brushed = surface(0x647076, 0.42, 0.51);
@@ -605,10 +650,10 @@ function makeCabGeometry(group: Group) {
   return { speed, pressure, power, reservoir, throttle, brake, amber, green, fill };
 }
 
-export function createCab() {
+export function createCab(grain?: Texture) {
   const group = new Group();
   const eye = new Vector3(0.38, 2.70, -9.33);
-  const instruments = makeCabGeometry(group);
+  const instruments = makeCabGeometry(group, grain);
   const headlight = trainHeadlight(group);
   function update(state: TrainVisualState) {
     instruments.speed(state.speed * 3.6, state.night);

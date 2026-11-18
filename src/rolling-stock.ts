@@ -583,9 +583,10 @@ function headlampGlow() {
 }
 
 function trainHeadlight(body: Group, showpiece = false) {
-  const light = new SpotLight(0xffe5c4, showpiece ? 350 : 380, 125, 0.21, 0.68, 1.25);
+  const light = showpiece ? new SpotLight(0xffe5c4, 145, 73, 0.245, 0.89, 1.39)
+    : new SpotLight(0xffe5c4, 380, 125, 0.21, 0.68, 1.25);
   light.position.set(0, 1.64, -12.15);
-  light.target.position.set(0, 0.70, -52);
+  light.target.position.set(0, showpiece ? 0.20 : 0.70, showpiece ? -36.5 : -52);
   light.visible = false;
   const length = showpiece ? 52 : 46;
   const beam = new Mesh(
@@ -621,7 +622,8 @@ function trainHeadlight(body: Group, showpiece = false) {
         }`,
     }),
   );
-  const depression = Math.atan2(0.94, 39.85);
+  const depression = Math.atan2(light.position.y - light.target.position.y,
+    light.position.z - light.target.position.z);
   beam.rotateX(Math.PI / 2 - depression);
   beam.position.set(0, -Math.sin(depression) * length / 2, -Math.cos(depression) * length / 2);
   light.add(beam);

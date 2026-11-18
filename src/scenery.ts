@@ -20,6 +20,7 @@ import {
   Raycaster,
   RepeatWrapping,
   ShapeUtils,
+  SpotLight,
   SRGBColorSpace,
   Uint8BufferAttribute,
   Vector2,
@@ -1641,7 +1642,7 @@ function addPlatforms(
   const tactilePavers: Transform[] = [];
   const posts: Transform[] = [];
   const lamps: Transform[] = [];
-  const bulbs: PointLight[] = [];
+  const bulbs: (PointLight | SpotLight)[] = [];
   const platforms: PassengerPlatform[] = [];
   const amenities: PlatformAmenities = { wood: [], steel: [], glass: [], bins: [] };
   const stripe = material(0xd5bb6c, 0.85);
@@ -1752,8 +1753,13 @@ function addPlatforms(
         posts.push(beam(foot, mast, 0.11), beam(mast, hood, 0.052));
         lamps.push({ position: hood, scale: new Vector3(0.32, 0.07, 0.32) });
         if (bulbs.length < 5 && hood.distanceTo(track) < 68) {
-          const light = new PointLight(0xffcc85, 0, 19, 2);
+          const light = polished ? new SpotLight(0xffc38b, 0, 18, 0.96, 0.79, 2)
+            : new PointLight(0xffcc85, 0, 19, 2);
           light.position.copy(hood).add(new Vector3(0, -0.14, 0));
+          if (light instanceof SpotLight) {
+            light.target.position.copy(foot).addScaledVector(normal, 1.15);
+            group.add(light.target);
+          }
           bulbs.push(light);
           group.add(light);
         }
@@ -2616,7 +2622,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
     fixtures.emissiveIntensity = night ? 2.4 : 0;
     for (const bulb of bulbs) {
       bulb.visible = false;
-      bulb.intensity = night ? 31 : 0;
+      bulb.intensity = night ? bulb instanceof SpotLight ? 225 : 31 : 0;
     }
     water.color.setHex(polished ? (night ? 0x63758b : 0x7996a7) : (night ? 0x20354b : 0x365762));
   };

@@ -2620,8 +2620,11 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   addParallelTracks(group, data, nearby, ballast, polished);
   const releaseWater = addWater(group, data, water, polished, maps.waterReflection, placement);
   addBuildings(group, data, windows, roofs, maps.siding, nearby, polished);
+  const streets = maps.vossStreets;
   const vegetation = polished ? createVegetation(data, rail, {
     ownsCell: placement?.ownsCell,
+    meadowAllowed: streets && ((east, north) =>
+      Math.hypot(east - streets.center[0], north - streets.center[1]) > streets.radiusMetres),
     heightAt: (x, z) => gradedHeight(data, nearby, x, z),
     portalRail: placement?.gradeRail,
     portalSpans: placement?.gradeSpans,
@@ -2635,7 +2638,6 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   const setSignal = addSignals(group, data, nearby);
   const { bulbs, platforms, setPlatformWeather } = addPlatforms(group, data, rail, concrete, fixtures, nearby, polished, maps.siding);
   if (polished) addWaitingShelters(group, data, platforms, nearby, maps.siding);
-  const streets = maps.vossStreets;
   if (polished && streets && data.stations.some(station => station.osmId === streets.stationOsmId)) {
     group.add(createVossStreets(streets, {
       heightAt: sampleVossStreetTerrain(terrain, streets, (east, z) => gradedHeight(data, nearby, east, z)),

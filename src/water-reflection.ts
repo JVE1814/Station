@@ -141,7 +141,7 @@ export class WaterReflection {
               + texture2D(lakeMirror, planarUv - vec2(spread,.0008)).rgb) * .23;
             reflectedValley *= vec3(.63, .74, .83);
             #ifdef WATER_BANK_FIELD
-              fresnel *= mix(.73, 1.0, smoothstep(.04, .62, waterDepth));
+              fresnel *= mix(.79, 1.0, smoothstep(.025, .29, waterDepth));
             #endif
             outgoingLight = mix(outgoingLight, reflectedValley,
               lakeReflectivity * fresnel * insideImage * planeBlend);

@@ -5,6 +5,7 @@ import {
 } from 'three';
 import type { Material, Texture } from 'three';
 import type { Rail } from './rail.ts';
+import { createGroundCover } from './ground-cover.ts';
 import { groundHeight } from './world-data.ts';
 import type { LocalPoint, TrackSpan, WorldData, WorldFeature } from './world-data.ts';
 
@@ -15,6 +16,7 @@ type TreeImage = CanvasImageSource & { width: number; height: number };
 export interface VegetationOptions {
   ownsCell?: (east: number, worldZ: number) => boolean;
   heightAt?: (east: number, worldZ: number) => number;
+  meadowAllowed?: (east: number, north: number) => boolean;
   portalRail?: Rail;
   portalSpans?: readonly TrackSpan[];
   spruceImage?: TreeImage;
@@ -290,7 +292,7 @@ function maintainedHeight(maturity: number, setback: number, morph: number) {
   return young + (maturity - young) * recovery;
 }
 
-export function placeVegetation(data: WorldData, rail: Rail, options: VegetationOptions = {}): Plant[] {
+function vegetationSite(data: WorldData, rail: Rail, options: VegetationOptions) {
   const terrain = data.terrain;
   const extent = {
     minX: terrain.east, maxX: terrain.east + (terrain.width - 1) * terrain.spacing,
@@ -300,8 +302,22 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
   const distanceToTrack = collectSurfaceTrack(data);
   const accepted = (x: number, y: number) =>
     inBounds(x, y, extent) && (options.ownsCell?.(x, -y) ?? true) && !excluded(x, y);
-  const plants: Plant[] = [];
   const mouths = tunnelMouths(options.portalRail ?? rail, options.portalSpans ?? data.spans);
+  const groundSlope = (x: number, y: number) => Math.hypot(
+    groundHeight(terrain, x + 2, y) - groundHeight(terrain, x - 2, y),
+    groundHeight(terrain, x, y + 2) - groundHeight(terrain, x, y - 2),
+  ) / 4;
+  return { extent, woodAt, distanceToTrack, accepted, mouths, groundSlope };
+}
+
+export function placeVegetation(data: WorldData, rail: Rail, options: VegetationOptions = {}): Plant[] {
+  return plantVegetation(data, rail, vegetationSite(data, rail, options));
+}
+
+function plantVegetation(data: WorldData, rail: Rail, site: ReturnType<typeof vegetationSite>): Plant[] {
+  const { extent, woodAt, distanceToTrack, accepted, mouths, groundSlope } = site;
+  const terrain = data.terrain;
+  const plants: Plant[] = [];
   const grow = (x: number, y: number, kind: PlantKind, height: number, width: number, seed: number, dry = 0) => {
     const clearance = 12.8 + width * 0.5;
     if (mouths.some(([east, north]) => (x - east) ** 2 + (y - north) ** 2 < clearance ** 2)) return;
@@ -311,10 +327,6 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
     });
   };
 
-  const groundSlope = (x: number, y: number) => Math.hypot(
-    groundHeight(terrain, x + 2, y) - groundHeight(terrain, x - 2, y),
-    groundHeight(terrain, x, y + 2) - groundHeight(terrain, x, y - 2),
-  ) / 4;
   const dryBank = (x: number, y: number, railHeight: number, slope = groundSlope(x, y)) =>
     slope >= 0.20 && groundHeight(terrain, x, y) > railHeight + 0.4
       && (!woodAt(x, y) || distanceToTrack(x, y) <= 22);
@@ -1002,10 +1014,20 @@ function vegetationMaterials(options: VegetationOptions): SharedVegetationMateri
 }
 
 export function createVegetation(data: WorldData, rail: Rail, options: VegetationOptions = {}) {
-  const plants = placeVegetation(data, rail, options);
+  const site = vegetationSite(data, rail, options);
+  const plants = plantVegetation(data, rail, site);
   const group = new Group();
   group.name = 'Norwegian woodland and railway understory';
   const heightAt = options.heightAt ?? ((east, z) => groundHeight(data.terrain, east, -z));
+  const meadow = createGroundCover(site.extent, heightAt, (x, y) => {
+    const distance = site.distanceToTrack(x, y);
+    if (distance < 3.55 || distance > 45 || !site.accepted(x, y) || options.meadowAllowed?.(x, y) === false) return false;
+    if (site.mouths.some(([east, north]) => (x - east) ** 2 + (y - north) ** 2 < 13.3 ** 2)) return false;
+    return site.groundSlope(x, y) < .71 && (distance < 16 || !site.woodAt(x, y))
+      && site.accepted(x + .24, y) && site.accepted(x - .24, y)
+      && site.accepted(x, y + .24) && site.accepted(x, y - .24);
+  }, hash);
+  group.add(meadow.mesh);
   const buckets = new Map<string, { plants: Plant[]; cover: boolean }>();
   for (const plant of plants) {
     const cover = !forest.includes(plant.kind);
@@ -1041,6 +1063,7 @@ export function createVegetation(data: WorldData, rail: Rail, options: Vegetatio
   return {
     group,
     update(camera: Vector3, seconds: number, weather: VegetationWeather) {
+      meadow.update(camera, seconds, weather);
       elapsed += seconds;
       resources.uniforms.time.value = elapsed;
       resources.uniforms.breeze.value = weather === 'rain' ? 0.08 : weather === 'snow' ? 0.053 : 0.031;
@@ -1058,6 +1081,7 @@ export function createVegetation(data: WorldData, rail: Rail, options: Vegetatio
     dispose() {
       if (disposed) return;
       disposed = true;
+      meadow.dispose();
       for (const batch of batches) {
         batch.simpler.dispose();
         batch.simpler.geometry.dispose();

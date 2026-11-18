@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { createCanvas } from '@napi-rs/canvas';
-import { Vector3 } from 'three';
+import { Matrix4, Vector3 } from 'three';
 import { Rail } from '../src/rail.ts';
 import { createVegetation, placeVegetation } from '../src/vegetation.ts';
 
@@ -182,4 +182,34 @@ test('woodland detail is exclusive and wind updates matching shadow depth geomet
   } finally {
     globalThis.document = previous;
   }
+});
+
+test('near meadow blades preserve the mapped platforms, the rail gauge and tile ownership', (t) => {
+  const previous = globalThis.document;
+  globalThis.document = { createElement: () => createCanvas(1, 1) };
+  const vegetation = createVegetation(data, new Rail(data.rail), { ownsCell: east => east > 0,
+    meadowAllowed: (_east, north) => north >= -21 });
+  t.after(() => { vegetation.dispose(); globalThis.document = previous; });
+  const meadow = vegetation.group.getObjectByName('Short meadow grass');
+  const camera = new Vector3(12, 13, -27);
+  vegetation.update(camera, .02, 'clear');
+  assert.ok(meadow.visible && meadow.count > 900 && meadow.count < 16_000);
+  assert.equal(meadow.geometry.index.count / 3, 15);
+  const matrix = new Matrix4();
+  const roots = new Set();
+  for (let i = 0; i < meadow.count; i++) {
+    meadow.getMatrixAt(i, matrix);
+    const [, , , , , , , , , , , , east, height, z] = matrix.elements;
+    assert.ok(east >= 3.55 && Math.abs(east - 21) >= 3.55);
+    assert.ok(-z >= -21 && Math.abs(height - 9.965) < 0.0001);
+    assert.ok(!(east >= 4 && east <= 15 && -z >= 24 && -z <= 80));
+    roots.add(`${east}/${z}`);
+  }
+  assert.equal(roots.size, meadow.count);
+  vegetation.update(camera.clone().add(new Vector3(24, 0, 0)), .02, 'rain');
+  const moved = meadow.instanceMatrix.version;
+  vegetation.update(camera.clone().add(new Vector3(24, 0, 0)), .02, 'snow');
+  assert.equal(meadow.instanceMatrix.version, moved);
+  vegetation.update(camera.clone().add(new Vector3(0, 42, 0)), .02, 'snow');
+  assert.equal(meadow.visible, false);
 });

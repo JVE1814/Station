@@ -95,6 +95,7 @@ function particleTexture(snow: boolean): DataTexture {
 }
 
 export class Atmosphere {
+  private readonly scene: Scene;
   private readonly sun = new DirectionalLight(0xffe0af, 2.7);
   private readonly fill = new HemisphereLight(0xc3e0ff, 0x76684e, 2.2);
   private readonly fog = new FogExp2(0xb4c9d5, 0.00017);
@@ -109,6 +110,7 @@ export class Atmosphere {
   private readonly particles: Points<BufferGeometry, PointsMaterial>;
   private readonly positions: Float32Array;
   private readonly precipitation?: { rain: DataTexture; snow: DataTexture };
+  private readonly precipitationClearance = { value: 0.65 };
   private weather: Weather = 'clear';
   private density = 0.00013;
   private sunLevel = 2.7;
@@ -116,7 +118,8 @@ export class Atmosphere {
   private shelter = 0;
   private liveStockShadows = true;
 
-  constructor(private readonly scene: Scene, stockShadowLayer: number, showpiece = false) {
+  constructor(scene: Scene, stockShadowLayer: number, showpiece = false) {
+    this.scene = scene;
     if (showpiece) this.precipitation = { rain: particleTexture(false), snow: particleTexture(true) };
     this.sun.castShadow = true;
     this.sun.shadow.camera.layers.enable(stockShadowLayer);
@@ -145,7 +148,22 @@ export class Atmosphere {
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new BufferAttribute(this.positions, 3));
     const material = new PointsMaterial({ color: 0xf5f8ff, size: 0.10, transparent: true, opacity: 0.8, depthWrite: false });
+    if (showpiece) {
+      material.onBeforeCompile = shader => {
+        shader.uniforms.airClearance = this.precipitationClearance;
+        shader.vertexShader = shader.vertexShader
+          .replace('#include <common>', '#include <common>\nvarying float particleRange;')
+          .replace('#include <project_vertex>', '#include <project_vertex>\nparticleRange = length(mvPosition.xyz);');
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <common>', '#include <common>\nvarying float particleRange; uniform float airClearance;')
+          .replace('#include <alphatest_fragment>', `
+            diffuseColor.a *= smoothstep(airClearance, airClearance + 1.35, particleRange);
+            #include <alphatest_fragment>
+          `);
+      };
+    }
     this.particles = new Points(geometry, material);
+    this.particles.name = 'Airborne precipitation';
     this.particles.frustumCulled = false;
     this.scene.add(this.particles);
     this.set(false, 'clear');
@@ -180,7 +198,8 @@ export class Atmosphere {
     this.particles.visible = weather !== 'clear';
   }
 
-  update(position: Vector3, cameraPosition: Vector3, elapsed: number, underCover: boolean, stockShadowFocus?: Vector3): void {
+  update(position: Vector3, cameraPosition: Vector3, elapsed: number, underCover: boolean,
+    stockShadowFocus?: Vector3, inCab = false): void {
     this.shelter += (Number(underCover) - this.shelter) * (1 - Math.exp(-elapsed * 4));
     this.sun.intensity = this.sunLevel * (1 - this.shelter * 0.995);
     this.fill.intensity = this.fillLevel * (1 - this.shelter * 0.93);
@@ -214,6 +233,7 @@ export class Atmosphere {
     }
     this.particles.visible = this.weather !== 'clear' && !underCover;
     if (!this.particles.visible) return;
+    this.precipitationClearance.value = inCab ? 2.55 : 0.65;
     this.particles.position.copy(this.precipitation ? cameraPosition : position);
     this.particles.position.y -= this.precipitation ? 13 : 3;
     this.particles.updateMatrixWorld();

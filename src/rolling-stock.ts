@@ -1105,7 +1105,7 @@ function wetWindscreen(group: Group, trim: MeshStandardMaterial) {
         vec3 pattern = texture2D(marks, slide).rgb;
         float opacity = mix(pattern.g, pattern.r * 0.47 + pattern.b * 0.33, rain);
         vec2 inset = min(paneUv, 1.0 - paneUv);
-        opacity *= smoothstep(.013, .074, min(inset.x, inset.y));
+        opacity *= smoothstep(.028, .087, min(inset.x, inset.y));
         if (opacity < 0.011) discard;
         vec3 frost = vec3(0.67, 0.82, 0.93);
         vec3 drop = mix(vec3(0.22, 0.32, 0.42), vec3(0.68, 0.79, 0.85), pattern.b);

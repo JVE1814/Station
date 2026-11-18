@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createCanvas } from '@napi-rs/canvas';
 import { CabEffort, COMFORT_JERK, STEP, railGrip, stepTrain } from '../src/dynamics.ts';
 import { DrivingTutorial } from '../src/driving.ts';
 import { Rail } from '../src/rail.ts';
 import { Service } from '../src/service.ts';
+import { StoppingMarker } from '../src/showpiece-ui.ts';
 
 const rail = new Rail([
   { distance: 0, east: 0, north: 0, height: 50 },
@@ -178,4 +180,24 @@ test('tutorial progresses through real braking, coasting, doors and view control
   assert.ok(tutorial.done);
   assert.ok(service.state.elapsed < 60);
   assert.deepEqual(service.stopResults, []);
+});
+
+test('the world stop marker remains anchored and enlarges for approach visibility', (t) => {
+  const previous = globalThis.document;
+  globalThis.document = { createElement: () => createCanvas(1, 1) };
+  t.after(() => { globalThis.document = previous; });
+  const marker = new StoppingMarker();
+  const stop = stations[1];
+  marker.update(rail, stop, stop.stopDistance - 47, true);
+  assert.ok(marker.group.visible);
+  const anchor = marker.group.position.clone();
+  const label = marker.group.children[0];
+  const approachWidth = label.scale.x;
+  assert.ok(approachWidth > 4.5);
+  assert.deepEqual([...label.material.map.image.getContext('2d').getImageData(60, 35, 1, 1).data], [243, 189, 89, 255]);
+  marker.update(rail, stop, stop.stopDistance, true);
+  assert.ok(label.scale.x < approachWidth);
+  assert.deepEqual(marker.group.position, anchor);
+  marker.update(rail, stop, stop.stopDistance - 400, true);
+  assert.equal(marker.group.visible, false);
 });

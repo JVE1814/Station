@@ -31,3 +31,5 @@
 - Report calls and triangles on software WebGL. The 16.7 ms timing threshold applies to hardware High at 1920 × 1080.
 - Reframe the bridge, tunnel and lake overlook to show the piers, portal and train more clearly. Retake the corresponding before frames with the saved renderer and generate new paint-overs from those exact captures.
 - For visual review, track the minimum individual category score across both reviewers and the fourteen renders. Use the same reviewers on subsequent image-only passes.
+- Use the wider bridge composition after the closer view placed foreground trees across the train. Refine the river mesh near the mapped decks to reconcile terrain intersections and keep the OSM bank and island paths exact.
+- Grow short grasses in a cached circle near the driver's viewpoint. Use the same mapped buildings, platforms, water, woods and track setbacks as the larger plants. Keep grass out of the Voss street survey area and off steep rock and tunnel mouths.

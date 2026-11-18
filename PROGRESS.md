@@ -150,6 +150,12 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - TypeScript, lint, the 47 JavaScript tests and the Python data tests passed in development. Chromium captured the original and new 1920 × 1080 chase frames. The first triptych was assembled from the preserved source PNGs.
 - The remaining Ultra frames, comparison assembly, full release verification, graphics workload report and independent reviews are in progress.
 
+## First complete R40 gallery and blind review
+
+- Captured eight golden-hour frames at 1920 × 1080 Ultra, plus blue-hour and heavy-snow versions of the lakeside chase, Bulken cab and lake overlook. Each paint-over came from its paired original frame. The gallery verifier decoded every file and matched the two render panels in all eight full-width strips pixel-for-pixel to the standalone screenshots.
+- Two reviewers received only the fourteen renders. Their scores put the lowest visual category at 1/10. The leading issues were fan-shaped lake shading, sharp night beams, cab and passenger materials, and the visibility of the tunnel and train in overhead views. [Review A](reference/r40/review-a.md) · [Review B](reference/r40/review-b.md)
+- The independent keyboard reviewer finished all six practice steps and started the manual service. The visual refinements and the full release verification remain in progress.
+
 - Graduated trackside tree height from maintained suckers to mature woodland. In the same lakeside scene, the tallest rooted tree within 14 m of rail fell from 17.56 m to 2.78 m, and the tallest within 26 m fell from 18.95 m to 5.01 m. The mapped forest footprint and shrub exclusions still apply.
 - Added autumn colour within the birch shader using leaf chroma before any instance tint. In the original cutout, the mask strongly selected 75% of the sampled opaque canopy pixels and selected zero of the 4,023 sampled bare-stem pixels. Pine and spruce bypass the autumn mask.
 

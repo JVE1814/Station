@@ -36,3 +36,7 @@ node scripts/verify-r40-evidence.mjs
 ```
 
 Use `--only=01` to select the first shot or `--dir=/path/to/gallery` to work in another directory.
+
+## Independent visual review
+
+[Reviewer A’s notes](review-a.md) · [Reviewer B’s notes](review-b.md)

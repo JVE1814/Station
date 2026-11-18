@@ -1,0 +1,20 @@
+# Round 1
+
+**Worst visual issue: lake surface in 07 Lake Overlook, Golden and Snow. Materials 1/10.** Broad blue streaks fan out from polygon corners and make the water look like folded plastic. The overhead camera puts the artifact at the center of both frames. The weakest overall frame is 07 Night, where the train is barely visible beyond a headlight wedge and a dotted line of windows.
+
+| Shot | Weather | Lighting | Materials | Density | Atmosphere | Composition | Visual assessment |
+|---|---|---:|---:|---:|---:|---:|---|
+| 01 Lakeside Chase | Golden | 6 | 4 | 6 | 7 | 8 | The train’s diagonal and progressively hazier ridges give the frame depth. The opaque window band, mirror-sharp reflections, and repeated geometric shrubs make the foreground look synthetic. |
+| 01 Lakeside Chase | Night | 2 | 3 | 4 | 6 | 6 | Warm carriage windows carry the diagonal through a readable blue valley. The headlight throws an opaque-looking triangle with ruler-straight edges, and bright square flecks surround the lamps. |
+| 01 Lakeside Chase | Snow | 6 | 4 | 5 | 7 | 8 | The red train reads cleanly against the blue-white valley, and snow on the conifers helps sell the weather. Exposed ties meet the uniform snow with hard edges, and the shore still looks cut out. |
+| 02 Evanger Cab | Golden | 5 | 3 | 4 | 5 | 6 | The analog dials are legible and the curved track draws the eye into the valley. The desk and levers are uniformly smooth, and a razor-straight pale-blue strip slices across the left hillside. |
+| 03 Seimsgrend | Golden | 5 | 3 | 4 | 5 | 6 | The station sign and broadside train make the stop readable, and passenger shadows give it some depth. The passengers share a rigid stance, the red roof glares, and swirling grass texture dominates the bare foreground. |
+| 04 River Bridge | Golden | 6 | 2 | 5 | 6 | 7 | The train, bridge and valley layer well, with long shadows adding slope relief. The river is mirror-flat and saturated blue, with a straight-cut left bank and visibly serrated right bank. The piers look like unbroken concrete slabs. |
+| 05 Tunnel Mouth | Golden | 6 | 3 | 3 | 4 | 4 | Sunlight catches the roof and water, but the oversized foreground slope fills much of the frame with stretched grass. A shrub conceals the portal, and scattered identical bushes leave the other slope looking sparse. |
+| 06 Bulken Cab | Golden | 5 | 3 | 4 | 6 | 6 | The platform, catenary and lake give the cab view a strong vanishing point. Two nearly identical backpacked passengers stand close to camera, and the blank façades and smooth desk reinforce the toy-like appearance. |
+| 06 Bulken Cab | Night | 3 | 3 | 4 | 6 | 6 | Platform lights and warm windows give the station a sense of occupation. The nearest sleepers turn nearly white in the headlight while the neighboring track and near passengers lose most of their form. |
+| 06 Bulken Cab | Snow | 5 | 3 | 4 | 7 | 6 | The snowy treeline and softer lake horizon convey winter depth. The windshield frost has a conspicuously straight boundary, several flakes are obvious squares, and the nearest passengers’ legs appear detached from their torsos. |
+| 07 Lake Overlook | Golden | 4 | 1 | 4 | 3 | 4 | The shoreline and track give the view a clear layout. The overhead angle reduces the train to a dim red sliver and exposes fan-shaped water streaks and sharply polygonal islands. |
+| 07 Lake Overlook | Night | 2 | 2 | 2 | 4 | 3 | A few warm windows and the cool lake hint at the setting. The lower-right hillside falls nearly black, the train body dissolves, and the headlight wedge becomes the only strong focal point. |
+| 07 Lake Overlook | Snow | 4 | 1 | 4 | 2 | 4 | Snow improves track legibility and makes the train easier to locate. It also emphasizes the blocky shores, while bright flakes cluster in a conspicuously localized patch above the train and lake. |
+| 08 Voss Overlook | Golden | 5 | 2 | 3 | 3 | 4 | The train and station track layout are legible from above. Grass encroaches on the lower platform and obscures stretches of sleepers, houses sit on bare open grass, and the huge near-black roof takes over the lower right. |

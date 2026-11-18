@@ -1817,16 +1817,26 @@ function groundTexture(gravel: boolean) {
 function waterNormals() {
   const result = texture(128, (context) => {
     const pixels = context.createImageData(128, 128);
+    const waves = [
+      [2, 1, 0.037, 0.8], [1, -3, 0.025, 2.5], [5, 3, 0.014, 5.1],
+      [7, -4, 0.009, 0.3], [11, 13, 0.004, 3.3], [19, -9, 0.003, 4.1],
+    ];
     for (let y = 0; y < 128; y++) {
       for (let x = 0; x < 128; x++) {
         const u = x * Math.PI * 2 / 128;
         const v = y * Math.PI * 2 / 128;
-        const nx = Math.cos(3 * u + 4 * v) * 22 + Math.cos(9 * u + 3 * v) * 9 + Math.cos(17 * u - 7 * v) * 4;
-        const ny = Math.cos(7 * v - 2 * u) * 18 + Math.cos(15 * v - 4 * u) * 9 + Math.cos(11 * v + 12 * u) * 5;
+        let slopeX = 0;
+        let slopeY = 0;
+        for (const [east, north, amplitude, phase] of waves) {
+          const slope = amplitude * Math.cos(east * u + north * v + phase);
+          slopeX += east * slope;
+          slopeY += north * slope;
+        }
+        const length = Math.hypot(slopeX, slopeY, 1);
         const index = (y * 128 + x) * 4;
-        pixels.data[index] = 127 + nx;
-        pixels.data[index + 1] = 127 + ny;
-        pixels.data[index + 2] = 251;
+        pixels.data[index] = 127.5 * (1 - slopeX / length);
+        pixels.data[index + 1] = 127.5 * (1 - slopeY / length);
+        pixels.data[index + 2] = 127.5 * (1 + 1 / length);
         pixels.data[index + 3] = 255;
       }
     }

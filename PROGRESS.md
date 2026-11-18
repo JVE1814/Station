@@ -93,3 +93,8 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 
 - F4, F5 and F6 loaded in Chromium with external requests blocked and zero console errors. The F4 run switched from the full network to the Stavanger platform scenery and retained the running Bergen service.
 - The first full `npm run verify` finished with one failed stage, the 1080p CPU proxy. The latest build's isolated complete run is in progress.
+
+## Chase frame budget
+
+- The isolated run measured 4.69 ms in the cab and 5.41 ms in Bird’s-eye view. Chase measured 9.02 ms against the 8 ms CPU proxy limit.
+- Moved the live shadow window to the center of the consist and drew opaque stock before scenery. Large trackside structures still cast shadows. The small rail fixtures remain rendered without their own depth pass.

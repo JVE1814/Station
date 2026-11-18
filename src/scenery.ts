@@ -715,7 +715,8 @@ function addTrack(
       if (entries === posts || entries === porcelain) detail.name = 'Catenary support';
       if (entries === piers) detail.name = 'Bridge pier';
       if (entries === bridgeDetail) detail.name = 'Bridge railing';
-      detail.castShadow = entries !== fasteners && entries !== conductors;
+      // Reserve shadow-map detail for the larger shapes. The ties and fittings still render in the color pass.
+      detail.castShadow = entries === posts || entries === piers || entries === bridgeDetail;
       const radius = detailRange.get(entries);
       if (radius !== undefined) limited.push({ mesh: detail, radius });
       group.add(detail);

@@ -11,6 +11,7 @@ import { NetworkOverview } from './network-overview';
 import type { OverviewRoute } from './network-overview';
 import routeCatalog from '../data/route-catalog.json';
 import { Rail } from './rail';
+import type { RailPose } from './rail';
 import { createCab, createTrain, ROLLING_STOCK_SHADOW_LAYER } from './rolling-stock';
 import { auditTrackbed, createScenery } from './scenery';
 import { Service } from './service';
@@ -117,14 +118,19 @@ async function run(): Promise<void> {
   const matrix = new Matrix4();
   const up = new Vector3(0, 1, 0);
   const inverse = new Quaternion();
+  const stockShadowCenter = new Vector3();
+  const stockFront = new Vector3();
+  const stockRear = new Vector3();
+  const bogieAim = new Vector3();
+  const stockPose: RailPose = { position: new Vector3(), tangent: new Vector3(), cant: 0 };
 
   function place(group: Group, distance: number): void {
-    const front = rail.position(distance + 8.3);
-    const rear = rail.position(distance - 8.3);
+    const front = rail.position(distance + 8.3, stockFront);
+    const rear = rail.position(distance - 8.3, stockRear);
     group.position.copy(front).lerp(rear, 0.5);
     matrix.lookAt(rear, front, up);
     group.quaternion.setFromRotationMatrix(matrix);
-    group.rotateZ(rail.pose(distance, 6).cant);
+    group.rotateZ(rail.pose(distance, 6, stockPose).cant);
   }
 
   let paused = false;
@@ -147,9 +153,10 @@ async function run(): Promise<void> {
       inverse.copy(coach.group.quaternion).invert();
       const direction = backward ? -1 : 1;
       coach.bogies.forEach((bogie, axle) => {
-        const pose = rail.pose(distance + direction * (axle === 0 ? 8.3 : -8.3), 2);
+        const pose = rail.pose(distance + direction * (axle === 0 ? 8.3 : -8.3), 2, stockPose);
         bogie.position.copy(pose.position).sub(coach.group.position).applyQuaternion(inverse);
-        matrix.lookAt(pose.position, pose.position.clone().addScaledVector(pose.tangent, direction), up);
+        bogieAim.copy(pose.position).addScaledVector(pose.tangent, direction);
+        matrix.lookAt(pose.position, bogieAim, up);
         bogie.quaternion.setFromRotationMatrix(matrix).premultiply(inverse);
       });
       coach.group.visible = !(hideNose && index === leadIndex);
@@ -430,8 +437,9 @@ async function run(): Promise<void> {
     const visualTime = paused ? 0 : elapsed;
     const liveStockShadows = cameras.view === 'chase' || (cameras.view === 'map' && cameras.mapHeight <= 180)
       || (traffic?.active.some(movement => Math.abs(movement.chainage() - chainage) <= 180) ?? false);
+    const focus = liveStockShadows ? rail.position(chainage - 24.6, stockShadowCenter) : undefined;
     atmosphere.update(cab.group.position, cameras.camera.position, visualTime,
-      inTunnel && cameras.view === 'cab', liveStockShadows);
+      inTunnel && cameras.view === 'cab', focus);
     scenery.update(visualTime, cameras.camera.position, chainage, cameras.mapFocus);
     updateMapScenery(visualTime, cameras.camera.position, cameras.mapFocus);
     markPhase('station-render-start');

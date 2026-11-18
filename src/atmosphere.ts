@@ -28,6 +28,7 @@ const skyPalette = {
   rain: { horizon: [124, 149, 163], zenith: [83, 114, 137], ground: [77, 91, 87] },
   snow: { horizon: [183, 201, 211], zenith: [142, 173, 197], ground: [138, 151, 152] },
 };
+const STOCK_SHADOW_EXTENT = 70;
 
 function skyTexture(sky: Sky, width: number, height: number): DataTexture {
   const data = new Uint8Array(width * height * 4);
@@ -102,10 +103,10 @@ export class Atmosphere {
     this.sun.shadow.camera.layers.enable(stockShadowLayer);
     this.sun.shadow.mapSize.set(1024, 1024);
     this.sun.shadow.autoUpdate = false;
-    this.sun.shadow.camera.left = -95;
-    this.sun.shadow.camera.right = 95;
-    this.sun.shadow.camera.top = 95;
-    this.sun.shadow.camera.bottom = -95;
+    this.sun.shadow.camera.left = -STOCK_SHADOW_EXTENT;
+    this.sun.shadow.camera.right = STOCK_SHADOW_EXTENT;
+    this.sun.shadow.camera.top = STOCK_SHADOW_EXTENT;
+    this.sun.shadow.camera.bottom = -STOCK_SHADOW_EXTENT;
     this.sun.shadow.camera.far = 360;
     this.sun.shadow.normalBias = 0.06;
     this.sun.shadow.bias = -0.00018;
@@ -155,17 +156,18 @@ export class Atmosphere {
     this.particles.visible = weather !== 'clear';
   }
 
-  update(position: Vector3, cameraPosition: Vector3, elapsed: number, underCover: boolean, liveStockShadows: boolean): void {
+  update(position: Vector3, cameraPosition: Vector3, elapsed: number, underCover: boolean, stockShadowFocus?: Vector3): void {
     this.shelter += (Number(underCover) - this.shelter) * (1 - Math.exp(-elapsed * 4));
     this.sun.intensity = this.sunLevel * (1 - this.shelter * 0.995);
     this.fill.intensity = this.fillLevel * (1 - this.shelter * 0.93);
     this.dome.position.copy(cameraPosition);
     this.dome.updateMatrixWorld();
     this.fog.density = this.density / (1 + Math.max(0, cameraPosition.y - position.y) / 500);
+    const liveStockShadows = stockShadowFocus !== undefined;
     const viewChanged = this.liveStockShadows !== liveStockShadows;
     if (viewChanged) {
       this.liveStockShadows = liveStockShadows;
-      const extent = liveStockShadows ? 95 : 150;
+      const extent = liveStockShadows ? STOCK_SHADOW_EXTENT : 150;
       const camera = this.sun.shadow.camera;
       camera.left = camera.bottom = -extent;
       camera.right = camera.top = extent;
@@ -173,9 +175,10 @@ export class Atmosphere {
     }
     // Reuse the corridor's static shadows while looking out of the cab or down from a high map view.
     const refreshDistance = liveStockShadows ? 0.85 : 95;
-    if (viewChanged || this.shadowCenter.distanceToSquared(position) >= refreshDistance ** 2) {
-      this.shadowCenter.copy(position);
-      this.sun.target.position.copy(position);
+    const focus = stockShadowFocus ?? position;
+    if (viewChanged || this.shadowCenter.distanceToSquared(focus) >= refreshDistance ** 2) {
+      this.shadowCenter.copy(focus);
+      this.sun.target.position.copy(focus);
       if (!liveStockShadows) {
         this.shadowDirection.copy(cameraPosition).sub(position).setY(0).normalize();
         this.sun.target.position.addScaledVector(this.shadowDirection, 60);

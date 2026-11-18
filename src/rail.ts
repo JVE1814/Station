@@ -16,6 +16,10 @@ export interface RailPose {
 export class Rail {
   private readonly points: readonly RailPoint[];
   private readonly tangent: Float32Array;
+  private readonly gradientSegments = [0, 0];
+  private readonly poseStart = new Vector3();
+  private readonly poseEnd = new Vector3();
+  private readonly posePrevious = new Vector3();
 
   constructor(points: readonly RailPoint[]) {
     this.points = points;
@@ -95,24 +99,32 @@ export class Rail {
     const from = Math.max(this.points[0].distance, distance - 2);
     const to = Math.min(this.length, distance + 2);
     if (from >= to) return 0;
-    const height = (chainage: number) => {
-      const index = this.segment(chainage);
+    const height = (chainage: number, edge: number) => {
+      let index = this.gradientSegments[edge];
+      if (chainage < this.points[index].distance || chainage > this.points[index + 1].distance) {
+        index = this.segment(chainage);
+        this.gradientSegments[edge] = index;
+      }
       const a = this.points[index];
       const b = this.points[index + 1];
       return a.height + (b.height - a.height) * (chainage - a.distance) / (b.distance - a.distance);
     };
-    return (height(to) - height(from)) / (to - from);
+    return (height(to, 1) - height(from, 0)) / (to - from);
   }
 
-  pose(distance: number, tangentSpan = 3): RailPose {
-    const position = this.position(distance);
-    const start = this.position(distance - tangentSpan);
-    const end = this.position(distance + tangentSpan);
-    const tangent = end.clone().sub(start).normalize();
-    const previous = position.clone().sub(start).normalize();
+  pose(distance: number, tangentSpan = 3, target?: RailPose): RailPose {
+    const position = this.position(distance, target?.position);
+    const start = this.position(distance - tangentSpan, this.poseStart);
+    const end = this.position(distance + tangentSpan, this.poseEnd);
+    const tangent = (target?.tangent ?? new Vector3()).copy(end).sub(start).normalize();
+    const previous = this.posePrevious.copy(position).sub(start).normalize();
     const next = end.sub(position).normalize();
     const signedTurn = previous.cross(next).y;
     const cant = Math.max(-0.105, Math.min(0.105, signedTurn * 2.5));
+    if (target) {
+      target.cant = cant;
+      return target;
+    }
     return { position, tangent, cant };
   }
 }

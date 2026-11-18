@@ -557,6 +557,12 @@ export function createTrain(leading = true, brushedSteel?: Texture) {
     buildBogie(group, underframe, metal, 8.3),
   ];
   batchRigidParts(group);
+  // The opaque body supplies depth before the backdrop and track underneath the train.
+  group.traverse(object => {
+    if (!(object instanceof Mesh)) return;
+    const surfaces = Array.isArray(object.material) ? object.material : [object.material];
+    if (surfaces.every(surface => !surface.transparent)) object.renderOrder = -5;
+  });
   batchRigidShadow(group);
   function update(state: TrainVisualState) {
     windowMaterial.emissiveIntensity = state.night ? 0.75 : 0.025;

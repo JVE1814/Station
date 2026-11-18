@@ -1,0 +1,62 @@
+
+added 126 packages in 7s
+
+> station@0.1.0 typecheck
+> tsc --noEmit
+
+
+> station@0.1.0 lint
+> eslint .
+
+
+> station@0.1.0 test
+> python3 -m unittest discover -s scripts -v && node --test scripts/test-*.mjs
+
+test_rejects_surface_artifacts_without_moving_an_already_safe_profile (test_grade.GradeFitTest.test_rejects_surface_artifacts_without_moving_an_already_safe_profile) ... ok
+test_download_rejects_truncated_response_and_keeps_previous_file (test_source_data.SourceDataTest.test_download_rejects_truncated_response_and_keeps_previous_file) ... ok
+test_elevation_bounds_cross_degree_boundaries (test_source_data.SourceDataTest.test_elevation_bounds_cross_degree_boundaries) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.003s
+
+OK
+✔ constructs ordered blocks at supplied signal chainages and at route ends (5.593163ms)
+✔ displays approach then stop before a leading train and clears when its rear passes (0.964694ms)
+✔ rejects conflicting reservations without granting any part of a request (0.4836ms)
+✔ prevents tunnelling through an occupied or reserved block on a large update (5.809622ms)
+✔ reports authority and retains shared protection for opposing moves (0.840914ms)
+✔ opposing passages through the same mapped track share one physical lock (0.506625ms)
+✔ every settled camera follows interpolated train motion frame to frame (38.221789ms)
+✔ switching into the map animates from the current camera pose (1.33172ms)
+✔ traction changes acceleration within the service jerk limit (13.604138ms)
+✔ interpolated pose is independent of render frame subdivision (1.201584ms)
+✔ open doors interlock traction when stopped (0.266148ms)
+✔ automatic service slows for a lower limit and stops near the marker (119.410858ms)
+✔ changing ends mirrors the lead reference onto the same physical alignment (84.660407ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 890.491733
+
+> station@0.1.0 build
+> vite build
+
+vite v8.3.8 building client environment for production...
+transforming...
+✓ 28 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                           3.34 kB │ gzip:  1.18 kB
+dist/assets/index-BZKJPMbS.css            3.13 kB │ gzip:  1.29 kB
+dist/assets/index-BL2qlRo3.js           108.24 kB │ gzip: 39.77 kB
+dist/assets/three-core-De4DrdBF.js      217.44 kB │ gzip: 58.63 kB
+dist/assets/three-renderer-DHWKlqaP.js  352.59 kB │ gzip: 84.31 kB
+
+✓ built in 2.24s
+2 OSM station names match. Maximum displacement 0.000 m.
+Maximum horizontal rail displacement 0.022 m.
+R40 autopilot: 190.50 s, 1.91 m stopping error, 0.550 m/s³ peak longitudinal jerk.

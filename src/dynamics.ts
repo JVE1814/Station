@@ -42,8 +42,11 @@ export function stepTrain(
   const traction = controls.brake > 0 || controls.doorsOpen
     ? 0
     : controls.throttle * fullTraction(state.speed);
-  const target = traction - controls.brake * SERVICE_DECELERATION - resistance(state.speed, gradient);
+  const effort = traction - controls.brake * SERVICE_DECELERATION - resistance(state.speed, gradient);
   const jerkStep = COMFORT_JERK * STEP;
+  // Preserve enough speed to release the remaining deceleration before standstill.
+  const stoppingEnvelope = jerkStep - Math.sqrt(jerkStep ** 2 + 2 * COMFORT_JERK * state.speed);
+  const target = Math.max(effort, stoppingEnvelope);
   const acceleration = Math.min(
     state.acceleration + jerkStep,
     Math.max(state.acceleration - jerkStep, target),

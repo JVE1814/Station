@@ -121,8 +121,9 @@ export class Service {
       const remaining = target ? target.stopDistance - reference : 0;
       const gradient = this.rail.gradient(reference);
       const authority = this.blocks.aspect(this.id, reference + trainFront);
-      const available = authority.stopDistance === null
-        ? Infinity : authority.stopDistance - reference - trainFront;
+      const trackEnd = this.rail.length - trainFront;
+      const available = Math.min(trackEnd - reference, authority.stopDistance === null
+        ? Infinity : authority.stopDistance - reference - trainFront);
       if (this.automatic) this.updateAutomatic(state, reference, remaining, available, gradient);
       const safetyBrake = available < state.speed ** 2 / 0.94 + state.speed * 1.9 + 1;
       const controls = safetyBrake ? { ...this.controls, throttle: 0, brake: 1 } : this.controls;
@@ -142,6 +143,11 @@ export class Service {
         this.dwellUntil = Math.max(state.elapsed + 15, waitUntil);
       }
       const next = stepTrain(state, controls, gradient);
+      if (this.chainage(next.distance) > trackEnd) {
+        this.emergencyStops++;
+        next.distance = trackEnd - this.referenceOffset;
+        next.speed = 0;
+      }
       if (!this.moveFootprint(this.chainage(next.distance))) {
         if (state.speed > 0) this.emergencyStops++;
         return { ...state, speed: 0, acceleration: 0, elapsed: next.elapsed };
@@ -151,10 +157,6 @@ export class Service {
         this.discomfort += STEP * (Math.max(0, Math.abs(next.acceleration) - 0.65)
           + Math.max(0, jerk - 0.35));
         this.movingTime += STEP;
-      }
-      if (this.chainage(next.distance) >= this.rail.length) {
-        next.distance = this.rail.length - this.referenceOffset;
-        next.speed = 0;
       }
       return next;
     });
@@ -177,7 +179,7 @@ export class Service {
       this.controls.brake = 1;
       return;
     }
-    if (stationDistance <= 5 && stationDistance >= -7 && state.speed < 0.03) {
+    if (stationDistance <= 5 && stationDistance >= -7 && state.speed < 0.0005) {
       this.controls.doorsOpen = true;
       this.controls.brake = 1;
       return;

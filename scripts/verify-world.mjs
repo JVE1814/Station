@@ -41,14 +41,19 @@ const service = new Service(world, rail);
 service.automatic = true;
 let previous = service.state;
 let jerk = 0;
+let observedAcceleration = 0;
 let duration = 0;
 for (; service.nextStop && duration < 1200; duration += 0.05) {
   const state = service.tick(0.05);
   assert.ok(state.distance >= previous.distance, 'Train position reversed');
   assert.ok(state.distance - previous.distance <= Math.max(state.speed, previous.speed) * 0.05 + 0.001, 'Train position jumped');
-  jerk = Math.max(jerk, Math.abs(state.acceleration - previous.acceleration) / 0.05);
+  const rate = (state.speed - previous.speed) / 0.05;
+  jerk = Math.max(jerk, Math.abs(state.acceleration - previous.acceleration) / 0.05,
+    Math.abs(rate - observedAcceleration) / 0.05);
+  observedAcceleration = rate;
   previous = state;
 }
 assert.equal(service.nextStop, undefined, 'Autopilot did not complete');
+assert.equal(service.emergencyStops, 0);
 assert.ok(jerk <= COMFORT_JERK + 1e-6, `Peak jerk ${jerk} m/s³ exceeds ${COMFORT_JERK}`);
 console.log(`${world.service} autopilot: ${duration.toFixed(2)} s, ${Math.abs(service.stoppingError).toFixed(2)} m stopping error, ${jerk.toFixed(3)} m/s³ peak longitudinal jerk.`);

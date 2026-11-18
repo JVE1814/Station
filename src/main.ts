@@ -37,6 +37,7 @@ async function run(): Promise<void> {
   const service = new Service(data, rail);
   const traffic = network?.traffic?.length ? new Traffic(data, rail, service, network.traffic) : null;
   const scene = new Scene();
+  scene.matrixAutoUpdate = false;
   const renderer = new WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio));
   renderer.toneMapping = ACESFilmicToneMapping;

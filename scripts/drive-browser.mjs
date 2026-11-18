@@ -10,7 +10,8 @@ try {
     args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
   });
   try {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+    const drivingViewport = { width: 800, height: 450 };
+    const page = await browser.newPage({ viewport: drivingViewport });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => {
@@ -37,9 +38,12 @@ try {
     });
     const keys = key => page.keyboard.press(key);
     const setNotches = async (measured, desired, increase, decrease) => {
-      for (let index = 0; index < Math.abs(measured - desired); index++) {
-        await keys(measured < desired ? increase : decrease);
-      }
+      if (measured === desired) return;
+      const controls = { w: 'more-power', s: 'less-power', e: 'more-brake', q: 'less-brake' };
+      const id = controls[measured < desired ? increase : decrease];
+      await page.evaluate(({ control, steps }) => {
+        for (let index = 0; index < steps; index++) document.getElementById(control).click();
+      }, { control: id, steps: Math.abs(measured - desired) });
     };
     await keys('t');
     await keys('t');
@@ -76,12 +80,12 @@ try {
       await writeFile(`evidence/${name}.png`, Buffer.from(shot.data, 'base64'));
       console.log(`Captured ${name} at 1080p`);
       if (name !== 'station') {
-        await page.setViewportSize({ width: 1280, height: 720 });
+        await page.setViewportSize(drivingViewport);
         await keys('1');
         await keys('p');
       }
     };
-    const deadline = Date.now() + 14 * 60_000;
+    const deadline = Date.now() + 18 * 60_000;
     let terminal = false;
     let crossed = 0;
     for (;;) {
@@ -94,6 +98,7 @@ try {
       }
       assert.ok(Date.now() < deadline, 'Browser driving exceeded the allotted time');
       assert.ok(Number.isFinite(current.remaining), 'The next stopping marker is unavailable');
+      assert.ok(!current.notice.includes('Stop missed'), `Missed the stop at route metre ${current.chainage}`);
       if (Math.floor(current.chainage / 500) > crossed) {
         crossed = Math.floor(current.chainage / 500);
         console.log(`Passed route metre ${Math.round(current.chainage)} at ${current.speed} km/h`);

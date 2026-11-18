@@ -102,6 +102,7 @@ function verifyRun(route) {
   service.automatic = true;
   let last = service.state;
   let jerk = 0;
+  let observedAcceleration = 0;
   let seconds = 0;
   const interval = 0.25;
   for (; service.nextStop && seconds < 36_000; seconds += interval) {
@@ -109,7 +110,10 @@ function verifyRun(route) {
     traffic.update(state.elapsed, interval);
     assert.ok(state.distance >= last.distance && state.distance - last.distance <= Math.max(last.speed, state.speed) * interval + 0.01,
       `${route.ref} moved discontinuously at ${state.distance.toFixed(2)} m`);
-    jerk = Math.max(jerk, Math.abs(last.acceleration - state.acceleration) / interval);
+    const rate = (state.speed - last.speed) / interval;
+    jerk = Math.max(jerk, Math.abs(last.acceleration - state.acceleration) / interval,
+      Math.abs(rate - observedAcceleration) / interval);
+    observedAcceleration = rate;
     last = state;
   }
   assert.equal(service.nextStop, undefined, `${route.ref} did not reach its final scheduled stop: ${service.nextStop?.name}`);

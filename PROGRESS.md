@@ -33,3 +33,10 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - Added the offline service picker and a full network fit in Bird’s-eye view. Nearby track, terrain and mapped features stream around the train or the close map focus.
 - The first five F4 meshes passed after a source-footprint clearance fix. Across 9,669 trackbed observations, the maximum gap was 0.282 m with no missing intersections. There were zero intersections in 333,675 coach-envelope observations. The larger geometry audit is running.
 - The nine R40 1080p comparisons and a brighter night refresh are committed under `evidence/`. The Chromium keyboard run departed Seimsgrend and switched to all three cameras. Its arrival is pending.
+
+## Full service replays
+
+- F4, F5 and F6 completed their dated schedules with 20, 27 and 19 calls after departure. The runs dispatched 3, 4 and 3 same-direction AI services and required zero emergency block or end-of-track stops.
+- Maximum rail deviation was 0.125 m across the three alignments. The 136 station markers matched their source names and positions, and the global rail joined exactly at each of the 169 tile interfaces.
+- The updated brake envelope limits measured longitudinal jerk during the final approach to rest. Velocity-derived peak jerk was 0.550 m/s³ on each replay. The worst stopping error was 1.96 m.
+- Fixed bridge approach grades and DSM terrain protrusions beneath a mapped bridge. Targeted rechecks passed for the affected F4 tiles and for R40. The full mesh audit continues.

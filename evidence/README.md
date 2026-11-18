@@ -9,3 +9,5 @@ Full-size PNGs are captured from the browser at 1920 × 1080. Comparison images 
 | Bird’s-eye | [Compare](comparisons/map-day.jpg) · [1080p](map-day.png) | [Compare](comparisons/map-night.jpg) · [1080p](map-night.png) | [Compare](comparisons/map-snow.jpg) · [1080p](map-snow.png) |
 
 The [capture log](r40-captures.txt) records the nine views and zero console errors. The [night refresh log](r40-night-refresh.txt) covers the brighter night capture set. The [initial verification log](r40-initial-verify.txt) records the geographic and clearance results and the SwiftShader timing timeout.
+
+[Intercity replay output](intercity-replays.txt) records the three route lengths, station and rail position errors, scheduled station calls, AI departures, stopping errors and velocity-derived jerk.

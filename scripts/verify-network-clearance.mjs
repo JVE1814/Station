@@ -9,7 +9,8 @@ const tiles = manifest.services.flatMap(service => service.tiles);
 const failures = [];
 let pointer = 0;
 let checked = 0;
-const concurrency = Math.min(2, Math.max(1, Number(process.env.STATION_AUDIT_WORKERS ?? 1)));
+const concurrency = Number(process.env.STATION_AUDIT_WORKERS ?? 2);
+if (concurrency !== 1 && concurrency !== 2) throw new Error('Use one or two geometry audit workers');
 
 async function worker() {
   while (pointer < tiles.length) {
@@ -19,7 +20,8 @@ async function worker() {
       console.log(`${tile.id} ${result.stdout.trim().replaceAll('\n', ' · ')}`);
     } catch (error) {
       failures.push(tile.id);
-      console.error(`${tile.id} ${error.stdout?.trim() || error.stderr?.trim() || error.message}`);
+      const detail = error.stderr?.match(/AssertionError[^\n]*/)?.[0];
+      console.error(`${tile.id} ${error.stdout?.trim() || error.message}${detail ? ` · ${detail}` : ''}`);
     }
     checked++;
   }

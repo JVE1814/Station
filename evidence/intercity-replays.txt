@@ -1,0 +1,9 @@
+F4: 48 OSM stations, 50 complete tiles, 483.80 km.
+  Maximum horizontal error 0.1246 m rail, 0.0000 m station.
+  Autopilot: 20 calls after departure, 3 scheduled AI trains, 1.96 m worst stop, 0.550 m/s³ peak jerk.
+F5: 54 OSM stations, 62 complete tiles, 586.40 km.
+  Maximum horizontal error 0.0495 m rail, 0.0000 m station.
+  Autopilot: 27 calls after departure, 4 scheduled AI trains, 1.92 m worst stop, 0.550 m/s³ peak jerk.
+F6: 34 OSM stations, 57 complete tiles, 550.66 km.
+  Maximum horizontal error 0.0910 m rail, 0.0000 m station.
+  Autopilot: 19 calls after departure, 3 scheduled AI trains, 1.91 m worst stop, 0.550 m/s³ peak jerk.

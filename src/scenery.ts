@@ -40,9 +40,9 @@ type Segment = {
   start: number;
   end: number;
   span: TrackSpan;
-  tunnel?: { start: number; end: number };
+  structure?: { kind: 'tunnel' | 'bridge'; start: number; end: number };
 };
-type Nearest = { height: number; distance: number; span: TrackSpan; portalDistance: number };
+type Nearest = { height: number; distance: number; span: TrackSpan; structureDistance: number };
 
 const UP = new Vector3(0, 1, 0);
 const X = new Vector3(1, 0, 0);
@@ -173,17 +173,18 @@ function routeIndex(rail: Rail, spans: TrackSpan[]) {
   const cells = new Map<string, Segment[]>();
   const step = 24;
   const interval = 8;
-  let tunnel: Segment['tunnel'];
+  let structure: Segment['structure'];
   for (const span of spans) {
-    if (span.tunnel) {
-      if (tunnel && Math.abs(span.start - tunnel.end) < 0.1) tunnel.end = span.end;
-      else tunnel = { start: span.start, end: span.end };
-    } else tunnel = undefined;
+    const kind = span.bridge ? 'bridge' : span.tunnel ? 'tunnel' : undefined;
+    if (kind) {
+      if (structure?.kind === kind && Math.abs(span.start - structure.end) < 0.1) structure.end = span.end;
+      else structure = { kind, start: span.start, end: span.end };
+    } else structure = undefined;
     for (let start = span.start; start < span.end; start += interval) {
       const end = Math.min(start + interval, span.end);
       const from = rail.position(start);
       const to = rail.position(end);
-      const segment: Segment = { from, to, start, end, span, tunnel };
+      const segment: Segment = { from, to, start, end, span, structure };
       for (let x = Math.floor((Math.min(from.x, to.x) - 30) / step); x <= Math.floor((Math.max(from.x, to.x) + 30) / step); x++) {
         for (let z = Math.floor((Math.min(from.z, to.z) - 30) / step); z <= Math.floor((Math.max(from.z, to.z) + 30) / step); z++) {
           const key = `${x}:${z}`;
@@ -196,7 +197,7 @@ function routeIndex(rail: Rail, spans: TrackSpan[]) {
   }
   const nearestAt = (x: number, z: number): Nearest | undefined => {
     let nearest: Nearest | undefined;
-    for (const { from, to, start, end, span, tunnel } of cells.get(`${Math.floor(x / step)}:${Math.floor(z / step)}`) ?? []) {
+    for (const { from, to, start, end, span, structure } of cells.get(`${Math.floor(x / step)}:${Math.floor(z / step)}`) ?? []) {
       const dx = to.x - from.x;
       const dz = to.z - from.z;
       const lengthSquared = dx * dx + dz * dz;
@@ -205,8 +206,9 @@ function routeIndex(rail: Rail, spans: TrackSpan[]) {
       const distance = Math.hypot(x - from.x - dx * fraction, z - from.z - dz * fraction);
       if (!nearest || nearest.distance > distance) {
         const chainage = start + (end - start) * fraction;
-        const portalDistance = tunnel ? Math.min(chainage - tunnel.start, tunnel.end - chainage) : Infinity;
-        nearest = { distance, span, portalDistance, height: from.y + (to.y - from.y) * fraction };
+        const structureDistance = structure
+          ? Math.min(chainage - structure.start, structure.end - chainage) : Infinity;
+        nearest = { distance, span, structureDistance, height: from.y + (to.y - from.y) * fraction };
       }
     }
     return nearest;
@@ -289,12 +291,21 @@ function forestCover(data: WorldData) {
 function gradedHeight(data: WorldData, nearby: ReturnType<typeof routeIndex>, x: number, z: number) {
   const source = elevationAt(data, x, z);
   const track = nearby(x, z);
-  if (!track || track.span.bridge) return source;
-  const mix = track.span.tunnel
-    ? smoothstep((8 - track.distance) / 5) * (1 - smoothstep((track.portalDistance - 5) / 5))
-    : smoothstep((15 - track.distance) / 12);
+  if (!track) return source;
   const trackbed = track.height - 0.33;
-  return source + (trackbed - source) * mix;
+  const formation = smoothstep((16 - track.distance) / 10);
+  if (track.span.bridge) {
+    // A surface DEM can capture the bridge deck or vegetation instead of land beneath it.
+    // Retain the sourced ground where it is low enough to leave the deck exposed.
+    const opening = smoothstep((track.structureDistance - 2.5) / 5);
+    const belowDeck = Math.min(source, trackbed - 1.35);
+    const apron = trackbed + (belowDeck - trackbed) * opening;
+    return source + (apron - source) * formation;
+  }
+  const blend = track.span.tunnel
+    ? smoothstep((8 - track.distance) / 5) * (1 - smoothstep((track.structureDistance - 5) / 5))
+    : formation;
+  return source + (trackbed - source) * blend;
 }
 
 function createTerrain(
@@ -385,7 +396,7 @@ function createTerrain(
           const x = (vertices[a * 3] + vertices[b * 3] + vertices[c * 3]) / 3;
           const z = (vertices[a * 3 + 2] + vertices[b * 3 + 2] + vertices[c * 3 + 2]) / 3;
           const track = nearby(x, z);
-          if (track?.span.tunnel && track.portalDistance >= 2.5 && track.distance < 4.2) {
+          if (track?.span.tunnel && track.structureDistance >= 2.5 && track.distance < 4.2) {
             // A raster surface cannot describe a bore. Remove cells crossing the arch.
             const low = Math.min(vertices[a * 3 + 1], vertices[b * 3 + 1], vertices[c * 3 + 1]);
             const high = Math.max(vertices[a * 3 + 1], vertices[b * 3 + 1], vertices[c * 3 + 1]);
@@ -470,6 +481,7 @@ function addTrack(
   rail: Rail,
   ballast: MeshStandardMaterial,
   concrete: MeshStandardMaterial,
+  nearby: ReturnType<typeof routeIndex>,
 ) {
   const full = { start: 0, end: rail.length };
   const steel = material(0x555d61, 0.32, 0.82);
@@ -605,7 +617,7 @@ function addTrack(
       ]) {
         const { position, tangent } = rail.pose(distance);
         const top = position.add(new Vector3(0, -0.65, 0));
-        const bottom = top.clone().setY(Math.min(top.y - 0.64, elevationAt(data, top.x, top.z) - 0.75));
+        const bottom = top.clone().setY(Math.min(top.y - 0.64, gradedHeight(data, nearby, top.x, top.z) - 0.75));
         const support = beam(bottom, top, 4.6, 1.65);
         support.rotation = new Quaternion().setFromUnitVectors(X, tangent.cross(UP).normalize());
         piers.push(support);
@@ -1734,7 +1746,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   const terrain = createTerrain(data, nearby, ground, placement?.ownsCell);
   const terrainTiles = terrain.children.filter(tile => tile instanceof Mesh);
   group.add(terrain);
-  const applyTrackDetail = addTrack(group, data, rail, ballast, concrete);
+  const applyTrackDetail = addTrack(group, data, rail, ballast, concrete, nearby);
   addParallelTracks(group, data, nearby, ballast);
   addWater(group, data, water);
   addBuildings(group, data, windows, roofs, maps.siding, nearby);

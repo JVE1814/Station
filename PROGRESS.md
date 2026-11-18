@@ -177,6 +177,7 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 
 - Baked 253 mapped Voss road, access and path segments within 500 m of the station from the pinned OSM extract. The street mesh follows the rendered terrain and stays outside the railway gauge and platform polygons. Two independent bakes reproduced the shipped data, and 8,183 probe rays found no ground clipping in the rendered surface.
 - The revised door cue recognizes the entire permitted platform zone at a standstill, and the terminal prompts to close doors when its dwell ends. Tests exercise the approach cue, terminal closure cue and retry status.
+- The keyboard reviewer verified the updated time-compression shortcut, help placement, practice instructions and initial door operation. The three original stop cards and the reviewer’s account are preserved in the [keyboard evidence](reference/r40/keyboard/README.md).
 
 - Graduated trackside tree height from maintained suckers to mature woodland. In the same lakeside scene, the tallest rooted tree within 14 m of rail fell from 17.56 m to 2.78 m, and the tallest within 26 m fell from 18.95 m to 5.01 m. The mapped forest footprint and shrub exclusions still apply.
 - Added autumn colour within the birch shader using leaf chroma before any instance tint. In the original cutout, the mask strongly selected 75% of the sampled opaque canopy pixels and selected zero of the 4,023 sampled bare-stem pixels. Pine and spruce bypass the autumn mask.

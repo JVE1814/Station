@@ -24,4 +24,6 @@ The [network clearance output](network-clearance.txt) records the production mes
 
 The [offline network browser output](offline-network.txt) records WebGL2 startup for all three intercity routes and a Bird’s-eye jump from the F4 network view to the Stavanger platforms.
 
+The [complete release verification transcript](verify.txt) contains the clean installation, 24 tests, production build, route replays, 1080p timing, geometry audit and offline browser checks.
+
 The [pre-optimization cab sample](r40-timing-before-batching.txt) records the initial 1080p CPU proxy failure and render workload that led to terrain, forest and cab batching.

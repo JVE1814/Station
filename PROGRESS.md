@@ -98,3 +98,9 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 
 - The isolated run measured 4.69 ms in the cab and 5.41 ms in Bird’s-eye view. Chase measured 9.02 ms against the 8 ms CPU proxy limit.
 - Moved the live shadow window to the center of the consist and drew opaque stock before scenery. Large trackside structures still cast shadows. The small rail fixtures remain rendered without their own depth pass.
+
+## Release verification
+
+- `npm run verify -- --captures` exited successfully. Clean install, TypeScript, lint, all 24 tests, the static build, three intercity replays, every scenery tile and all three offline intercity browser checks passed.
+- At 1920 × 1080, the SwiftShader renderer-thread CPU proxy measured 6.32 ms in the cab, 5.54 ms in chase and 4.94 ms in Bird’s-eye view at p95. The transcript includes the longer software wall-frame intervals.
+- Captured the nine final camera and weather combinations near the Bulken tunnel exit. Chromium reported zero console errors and zero external requests. All 12 required captures passed the 1080p dimension check.

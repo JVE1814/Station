@@ -35,7 +35,8 @@ export class ShowpiecePanel {
       : !service.nextStop ? 'Service complete · R to retry'
       : service.canOpenDoors && !tutorial && inStopZone ? 'Within stop zone · D to open doors'
       : guidance.brakeNotch ? `Brake ${guidance.brakeNotch} · Aim for ${Math.round(guidance.recommendedSpeed)} km/h`
-      : `${guidance.powerNotch ? `Power ${guidance.powerNotch}` : 'Coast'} · Aim for ${Math.round(guidance.recommendedSpeed)} km/h`;
+      : guidance.powerNotch ? `Power ${guidance.powerNotch} · Aim for ${Math.round(guidance.recommendedSpeed)} km/h`
+      : `Coast · Stay under ${Math.round(guidance.recommendedSpeed)} km/h`;
     guide.dataset.brake = String(guidance.brakeNotch > 0 && service.state.speed > 1);
     number('grip').textContent = `${surfaceNames[weather]} · ${service.passengersAboard} aboard`;
     if (tutorial) {

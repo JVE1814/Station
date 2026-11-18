@@ -80,10 +80,11 @@ export function brakingGuidance(input: GuidanceInput): BrakingGuidance {
   const correction = (recommended - projected) / (recommended < 2 ? 1.3 : 2.4);
   const effort = correction + resistance(state.speed, gradient);
   const traction = fullTraction(state.speed) * tractionGrip;
+  const nearPlatform = stopDistance > 20 && stopDistance <= 160 && projected >= 4.2;
   return {
     target,
     recommendedSpeed: recommended * 3.6,
-    powerNotch: Math.max(0, Math.min(5, Math.round(5 * effort / traction))),
+    powerNotch: nearPlatform ? 0 : Math.max(0, Math.min(5, Math.round(5 * effort / traction))),
     brakeNotch: Math.max(0, Math.min(5, Math.round(-5 * effort / serviceBrake))),
   };
 }

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCanvas } from '@napi-rs/canvas';
 import { CabEffort, COMFORT_JERK, STEP, railGrip, stepTrain } from '../src/dynamics.ts';
-import { DrivingTutorial } from '../src/driving.ts';
+import { brakingGuidance, DrivingTutorial } from '../src/driving.ts';
 import { Rail } from '../src/rail.ts';
 import { Service } from '../src/service.ts';
 import { StoppingMarker } from '../src/showpiece-ui.ts';
@@ -111,6 +111,19 @@ test('preview uses the next signal in the running direction and brakes earlier o
   assert.equal(clear.guidance.target, 'signal');
   assert.ok(clear.guidance.brakeNotch > 0);
   assert.ok(snow.guidance.recommendedSpeed < clear.guidance.recommendedSpeed);
+});
+
+test('a rolling platform approach suggests coasting and retains brake and low-speed power', () => {
+  const approach = { state: { speed: 28 / 3.6, acceleration: 0 }, gradient: .012,
+    brakeGrip: 1, tractionGrip: 1, currentLimit: 70, stopDistance: 134,
+    signalDistance: Infinity, restrictions: [] };
+  const coast = brakingGuidance(approach);
+  assert.equal(coast.target, 'station');
+  assert.equal(coast.powerNotch, 0);
+  assert.equal(coast.brakeNotch, 0);
+  assert.ok(brakingGuidance({ ...approach, stopDistance: 200 }).powerNotch > 0);
+  assert.ok(brakingGuidance({ ...approach, state: { ...approach.state, speed: 1 } }).powerNotch > 0);
+  assert.ok(brakingGuidance({ ...approach, state: { ...approach.state, speed: 13 } }).brakeNotch > 0);
 });
 
 test('advisory notches serve each stop, collect boarding results, and preserve replay safety', () => {

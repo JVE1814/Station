@@ -21,6 +21,7 @@ import {
   RepeatWrapping,
   ShapeUtils,
   SRGBColorSpace,
+  Uint8BufferAttribute,
   Vector2,
   Vector3,
 } from 'three';
@@ -40,6 +41,7 @@ import type { VegetationOptions } from './vegetation.ts';
 import { createPassengers } from './passengers.ts';
 import type { PassengerPlatform } from './passengers.ts';
 import { groundHeight, type LocalPoint, type TrackSpan, type WorldData } from './world-data.ts';
+import { dressTunnelCut, tunnelCutField, tunnelWingStone } from './tunnel-cut.ts';
 
 type Weather = 'clear' | 'rain' | 'snow';
 type Transform = {
@@ -370,6 +372,7 @@ function createTerrain(
   paint: TerrainPaint,
   exposedRock: boolean,
   ownsCell?: (east: number, worldZ: number) => boolean,
+  cutField?: ReturnType<typeof tunnelCutField>,
 ) {
   const group = new Group();
   group.name = 'Graded Copernicus DEM';
@@ -402,6 +405,7 @@ function createTerrain(
       const colors: number[] = [];
       const normals: number[] = [];
       const rockExposure: number[] = [];
+      const cut: number[] = [];
       const uv: number[] = [];
       const cached = new Map<number, number>();
       const vertex = (col: number, row: number, x: number, y: number, resolution: number) => {
@@ -438,6 +442,7 @@ function createTerrain(
         const slope = 2 * (Math.abs(dx) + Math.abs(dz));
         const exposure = paint(worldX, worldZ, slope, soil);
         if (exposedRock) rockExposure.push(exposure);
+        cutField?.(worldX, h, worldZ, dx, dz, cut);
         colors.push(soil.r, soil.g, soil.b);
         cached.set(key, index);
         return index;
@@ -480,6 +485,7 @@ function createTerrain(
       if (indices.length === 0) continue;
       const tile = mesh(vertices, indices, surface, colors, uv, normals);
       if (exposedRock) tile.geometry.setAttribute('rockExposure', new Float32BufferAttribute(rockExposure, 1));
+      if (cutField) tile.geometry.setAttribute('tunnelCut', new Uint8BufferAttribute(cut, 2, true));
       tile.geometry.computeBoundingSphere();
       tile.geometry.computeBoundingBox();
       group.add(tile);
@@ -547,6 +553,7 @@ function addPortalBackfill(
   coverMaterial: MeshStandardMaterial,
   frontMaterial: MeshStandardMaterial,
   paint: TerrainPaint,
+  cutField?: ReturnType<typeof tunnelCutField>,
 ) {
   const offsets = [-9, -7.6, -6.2, -4.75, -4.45, -3.55, -2.35, -1.2, 0, 1.2, 2.35, 3.55, 4.45, 4.75, 6.2, 7.6, 9];
   const direction = mouth === span.start ? 1 : -1;
@@ -556,6 +563,7 @@ function addPortalBackfill(
   const vertices: number[] = [];
   const colors: number[] = [];
   const rockExposure: number[] = [];
+  const cut: number[] = [];
   const uv: number[] = [];
   const indices: number[] = [];
   const faceVertices: number[] = [];
@@ -582,8 +590,10 @@ function addPortalBackfill(
       const shaped = natural + Math.max(0, rockLip - natural) * lateral + 0.024;
       vertices.push(point.x, shaped, point.z);
       uv.push(point.x / 9, point.z / 9);
-      const slope = 2 * (Math.abs(gradedHeight(data, nearby, point.x + 3, point.z) - gradedHeight(data, nearby, point.x - 3, point.z))
-        + Math.abs(gradedHeight(data, nearby, point.x, point.z + 3) - gradedHeight(data, nearby, point.x, point.z - 3)));
+      const dx = gradedHeight(data, nearby, point.x + 3, point.z) - gradedHeight(data, nearby, point.x - 3, point.z);
+      const dz = gradedHeight(data, nearby, point.x, point.z + 3) - gradedHeight(data, nearby, point.x, point.z - 3);
+      const slope = 2 * (Math.abs(dx) + Math.abs(dz));
+      cutField?.(point.x, shaped, point.z, dx, dz, cut);
       const exposure = paint(point.x, point.z, slope, tint);
       const freshCut = Math.max(0, 1 - row / rows * 2.4) * lateral * 0.75;
       rockExposure.push(Math.max(exposure, freshCut));
@@ -607,6 +617,7 @@ function addPortalBackfill(
   }
   const fill = mesh(vertices, indices, coverMaterial, colors, uv);
   fill.geometry.setAttribute('rockExposure', new Float32BufferAttribute(rockExposure, 1));
+  if (cutField) fill.geometry.setAttribute('tunnelCut', new Uint8BufferAttribute(cut, 2, true));
   const frontage = mesh(faceVertices, faceIndices, frontMaterial, undefined, faceUv);
   fill.name = frontage.name = 'Tunnel portal';
   fill.castShadow = frontage.castShadow = true;
@@ -715,7 +726,7 @@ function addTrack(
   ballast: MeshStandardMaterial,
   concrete: MeshStandardMaterial,
   nearby: ReturnType<typeof routeIndex>,
-  portalTerrain?: { surface: MeshStandardMaterial; paint: TerrainPaint },
+  portalTerrain?: { surface: MeshStandardMaterial; paint: TerrainPaint; cut?: ReturnType<typeof tunnelCutField> },
 ) {
   const full = { start: 0, end: rail.length };
   const steel = material(0x555d61, 0.32, 0.82);
@@ -851,6 +862,7 @@ function addTrack(
   const pierSurface = portalTerrain && bedSpans.some(span => span.bridge) ? bridgePierMaterial() : concrete;
   tunnelSurface.side = DoubleSide;
   lining.side = DoubleSide;
+  const portalWings = archStone !== lining ? tunnelWingStone(lining) : lining;
   const bridgeDetail: Transform[] = [];
   for (const span of bedSpans) {
     if (!span.bridge && !span.tunnel) continue;
@@ -926,7 +938,7 @@ function addTrack(
         frontage.castShadow = Boolean(portalTerrain);
         group.add(portal, frontage);
         if (portalTerrain) {
-          addPortalBackfill(group, data, rail, nearby, span, end, portalTerrain.surface, lining, portalTerrain.paint);
+          addPortalBackfill(group, data, rail, nearby, span, end, portalTerrain.surface, portalWings, portalTerrain.paint, portalTerrain.cut);
         }
       }
     }
@@ -2541,11 +2553,13 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   if (polished) dustHighPeaks(distantGround);
   const nearby = routeIndex(placement?.gradeRail ?? rail, placement?.gradeSpans ?? data.spans);
   const paint = terrainPalette(data, nearby, Boolean(exposedRock));
-  const terrain = createTerrain(data, nearby, ground, paint, Boolean(exposedRock), placement?.ownsCell);
+  const cut = exposedRock ? tunnelCutField(placement?.gradeRail ?? rail, placement?.gradeSpans ?? data.spans) : undefined;
+  if (cut) dressTunnelCut(ground);
+  const terrain = createTerrain(data, nearby, ground, paint, Boolean(exposedRock), placement?.ownsCell, cut);
   const terrainTiles = terrain.children.filter(tile => tile instanceof Mesh);
   group.add(terrain);
   const applyTrackDetail = addTrack(group, data, rail, ballast, concrete, nearby,
-    exposedRock ? { surface: ground, paint } : undefined);
+    exposedRock ? { surface: ground, paint, cut } : undefined);
   addParallelTracks(group, data, nearby, ballast, polished);
   const releaseWater = addWater(group, data, water, polished, maps.waterReflection, placement);
   addBuildings(group, data, windows, roofs, maps.siding, nearby, polished);

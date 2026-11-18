@@ -50,8 +50,10 @@ try {
       await capture('whole-network');
       if (ref === 'F4') {
         await page.locator('#map-station').selectOption({ label: 'Stavanger' });
-        await page.waitForFunction(() => document.getElementById('world').dataset.detailLine === 'F5', null,
-          { timeout: 180_000, polling: 200 });
+        await page.waitForFunction(() => {
+          const { detailLine, view } = document.getElementById('world').dataset;
+          return detailLine === 'F5' && view === 'map';
+        }, null, { timeout: 180_000, polling: 200 });
         assert.equal(await page.locator('#line').textContent(), 'F4');
         await capture('map-stavanger');
         console.log('Zoomed from the whole network to mapped Stavanger platforms without changing the F4 service.');

@@ -180,6 +180,7 @@ async function run(): Promise<void> {
     const station = mapStations.get(Number(stationSelect.value));
     if (!station) return;
     const [east, north] = station.position;
+    delete world.dataset.view;
     cameras.fitMap(new Vector3(east, 0, -north), cab.group.position, 95);
     element('fit-network').textContent = 'Fit network';
     dirty = true;

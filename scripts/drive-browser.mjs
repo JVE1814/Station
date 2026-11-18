@@ -13,7 +13,7 @@ try {
     args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
   });
   try {
-    const drivingViewport = { width: 800, height: 450 };
+    const drivingViewport = { width: 640, height: 360 };
     const page = await browser.newPage({ viewport: drivingViewport });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -37,6 +37,7 @@ try {
         brake: Math.round(read('brake').value * 5),
         automatic: read('auto').getAttribute('aria-pressed') === 'true',
         notice: read('notice').textContent,
+        complete: read('next-stop').textContent === 'Service complete',
       };
     });
     const keys = key => page.keyboard.press(key);
@@ -75,12 +76,13 @@ try {
     const capture = async (name, view) => {
       const started = Date.now();
       await keys('p');
-      await page.setViewportSize({ width: 1920, height: 1080 });
       await keys(view === 'cab' ? '1' : '2');
-      await page.waitForFunction(selected => {
-        const world = document.getElementById('world');
-        return world.dataset.view === selected && world.querySelector('canvas').width === 1920;
-      }, view, { timeout: 120_000, polling: 150 });
+      await page.waitForFunction(selected => document.getElementById('world').dataset.view === selected,
+        view, { timeout: 120_000, polling: 150 });
+      await page.setViewportSize({ width: 1920, height: 1080 });
+      await page.waitForFunction(() => document.querySelector('#world canvas').width === 1920, null,
+        { timeout: 120_000, polling: 150 });
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const shot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true, optimizeForSpeed: true });
       await writeFile(`evidence/${name}.png`, Buffer.from(shot.data, 'base64'));
       console.log(`Captured ${name} at 1080p`);
@@ -97,8 +99,10 @@ try {
     for (;;) {
       const current = await state();
       assert.equal(current.automatic, false);
-      if (current.notice.includes('Score')) {
-        console.log(current.notice);
+      if (current.complete) {
+        await page.waitForFunction(() => document.getElementById('notice').textContent.includes('Score'), null,
+          { timeout: 60_000, polling: 150 });
+        console.log(await page.locator('#notice').textContent());
         await capture('station', 'chase');
         break;
       }
@@ -109,12 +113,14 @@ try {
         crossed = Math.floor(current.chainage / 500);
         console.log(`Passed route metre ${Math.round(current.chainage)} at ${current.speed} km/h`);
       }
-      if (current.remaining <= 75 && !terminal) {
+      if (current.remaining <= 38 && !terminal) {
         terminal = true;
+        await keys('t');
         await keys('t');
       }
       if (!bridgeApproach && current.chainage >= bridge.start - 120 && current.chainage < bridge.end) {
         bridgeApproach = true;
+        await keys('t');
         await keys('t');
       }
 
@@ -140,7 +146,6 @@ try {
       if (current.structure === 'bridge' && !snapshots.has('bridge')) {
         snapshots.add('bridge');
         await capture('bridge', 'chase');
-        await keys('t');
         await keys('t');
       }
       if (current.structure === 'tunnel' && current.chainage > 1885 && !snapshots.has('tunnel')) {

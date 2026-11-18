@@ -13,3 +13,5 @@ The [capture log](r40-captures.txt) records the nine views and zero console erro
 [Intercity replay output](intercity-replays.txt) records the three route lengths, station and rail position errors, scheduled station calls, AI departures, stopping errors and velocity-derived jerk.
 
 The [independent station audit](station-membership.txt) checks each displayed name and its coordinates against the pinned OSM extract. It traces nearby stations excluded from the simulation to their actual track. [Reproduction and source digests](station-membership.md)
+
+The browser drive captured the [river bridge](bridge.png) in chase view and the [Bulken tunnel](tunnel.png) from the cab.

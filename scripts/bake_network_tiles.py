@@ -191,8 +191,8 @@ def prepare_service(service, ways, projection, tile_length, padding, spacing):
     return service, projection, project, route, spans, structures, tiles
 
 
-def corridor_extract(snapshot, tiles, work):
-    if len(tiles) <= 8:
+def corridor_extract(snapshot, tiles, work, *, force=False):
+    if len(tiles) <= 8 and not force:
         return snapshot
     bounds = [tile["wgs84"] for tile in tiles]
     stat = snapshot.stat()
@@ -218,8 +218,8 @@ def corridor_extract(snapshot, tiles, work):
 
 
 
-def index_scenery_tiles(snapshot, tiles, work):
-    source = corridor_extract(snapshot, tiles, work).resolve()
+def index_scenery_tiles(snapshot, tiles, work, *, clip=False):
+    source = corridor_extract(snapshot, tiles, work, force=clip).resolve()
     stat = source.stat()
     source_id = (str(source), stat.st_size, stat.st_mtime_ns)
     indexed = {}
@@ -418,10 +418,11 @@ def scenery_features(vicinity, project, active_path, active_ways):
     return features, signal_events
 
 
-def bake_service(prepared, all_ways, local_inputs, output, work, spacing, compress):
+def bake_service(prepared, all_ways, local_inputs, output, work, spacing, compress, elevation=None):
     service, projection, project, route, spans, structures, tiles = prepared
     ref, source = service["ref"], service["sourcePath"]
-    grids = [terrain_for_tile(tile, projection, work, spacing) for tile in tiles]
+    grids = [elevation.grid(tile) if elevation else terrain_for_tile(tile, projection, work, spacing)
+             for tile in tiles]
     profile = build_profile(route, structures, tiles, grids)
     profile_distances = [row[0] for row in profile]
     source_distances = [entry["distance"] for entry in source]
@@ -480,7 +481,7 @@ def bake_service(prepared, all_ways, local_inputs, output, work, spacing, compre
     return manifest
 
 
-def bake_network(topology, snapshot, output, work, *, tile_length, padding, spacing, compress):
+def bake_network(topology, snapshot, output, work, *, tile_length, padding, spacing, compress, elevation=None, clip_scenery=False):
     if not all(isfinite(n) and n > 0 for n in (tile_length, padding, spacing)) or padding <= 2 * spacing:
         raise ValueError("Positive tile length and terrain spacing are required, with padding over two samples")
     work.mkdir(parents=True, exist_ok=True)
@@ -492,12 +493,13 @@ def bake_network(topology, snapshot, output, work, *, tile_length, padding, spac
                 for service in topology["services"]]
     tiles = [tile for service in prepared for tile in service[-1]]
     with ThreadPoolExecutor(max_workers=2) as workers:
-        elevation = workers.submit(prefetch_elevation, tiles)
-        local_inputs = index_scenery_tiles(snapshot, tiles, work)
-        elevation.result()
+        ready = (workers.submit(elevation.prefetch, tiles, projection, work, spacing)
+                 if elevation else workers.submit(prefetch_elevation, tiles))
+        local_inputs = index_scenery_tiles(snapshot, tiles, work, clip=clip_scenery)
+        ready.result()
     manifest = {
-        "version": 1, "projection": projection, "osmSnapshot": OSM_SNAPSHOT, "elevationSource": DEM_ROOT,
-        "services": [bake_service(service, topology["ways"], local_inputs, output, work, spacing, compress)
+        "version": 1, "projection": projection, "osmSnapshot": OSM_SNAPSHOT, "elevationSource": elevation.source if elevation else DEM_ROOT,
+        "services": [bake_service(service, topology["ways"], local_inputs, output, work, spacing, compress, elevation)
                      for service in prepared],
     }
     write_json(output / "network.json", manifest)

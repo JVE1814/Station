@@ -47,12 +47,14 @@ def publish(staged):
                          for station in service["stations"]],
         })
     write_bake(output / "overview-r40.json.gz", outline, compress=True)
+    regional = json.loads((output / "r40/network.json").read_text())["services"][0]
+    short_route = {**pair, "ref": "R40-short"}
     catalog = [
         {
             "ref": service.get("ref", service.get("service")),
             "name": f"{service['stations'][0]['name']} → {service['stations'][-1]['name']}",
         }
-        for service in [pair, *network["services"]]
+        for service in [regional, short_route, *network["services"]]
     ]
     write_json(ROOT / "data" / "route-catalog.json", catalog)
 
@@ -61,6 +63,7 @@ if __name__ == "__main__":
     CACHE.mkdir(exist_ok=True)
     run("scripts/bake_pair.py", 18567357, 432630619, 5594658999, "public/data/service.json",
         "--timetable", "data/r40-timetable.json")
+    run("scripts/bake_r40.py")
     topology = CACHE / "network-topology.json"
     run("scripts/network_alignment.py", topology)
     services = json.loads(topology.read_text())

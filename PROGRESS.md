@@ -117,3 +117,10 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - Ran six full-route diagnostics on the mapped Evanger–Voss rail profile built with Copernicus for the pilot bake. Automatic driving and the displayed advisory notches served all three stops in clear, wet and snowy conditions. Every run reported zero emergency stops, peak jerk of 0.550 m/s³ and errors between 1.55 and 1.98 m. The clear advisory run finished in 1005.79 simulated seconds with grade B, 89/100 and 39 passengers carried.
 - The six replays passed on the shipping Kartverket rail profile with 1.76–1.96 m stopping errors, zero emergency stops and 0.550 m/s³ peak jerk. The clear advisory run finished in 986.44 simulated seconds, grade A, 90/100 and 39 passengers carried.
 - Started a production-build Chromium keyboard check that follows the driving guidance, completes all six tutorial steps, visits all three views, saves the stop cards and retries the run.
+
+## Evanger–Voss source bake
+
+- Baked 17.440 km from the pinned OSM R40 relation, including the four mapped stations, sourced track approaches, bridges, tunnels, speed limits, overhead power, signals and surrounding features. The five streamed terrain grids use Kartverket’s open 1 m DTM1, resampled to 8 m. The bake requests raster windows from the official Geonorge ranges and records the four source revisions.
+- Matched all four calls on the selected Entur R40 journey for 18 November 2026, departing Evanger at 08:01 and arriving at Voss at 08:18. The dated timetable contains 36 district journeys in both directions.
+- Verified a maximum OSM plan error of 0.0296 m on the rendered rail spline and under 0.0001 m at the four station markers. Every source call and tile seam passed. The clearance audit checked 6,699 trackbed samples, with a maximum gap of 0.316 m and zero missing, plus 131,535 coach probes with no intersections.
+- The full data build now regenerates the separate Evanger–Voss data and catalog entry. The earlier Seimsgrend–Bulken checkpoint and the intercity assets keep their existing data paths.

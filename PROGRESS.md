@@ -129,3 +129,9 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 
 - Added OSM-bounded woodland with spruce, Scots pine and birch, plus procedural willow, grass, fern and fireweed along suitable rail shoulders. The placement excludes mapped water, buildings, platforms and the running-track corridor. Added an original generated cutout atlas for pine and birch.
 - TypeScript, targeted lint and three placement and LOD tests passed. An isolated Chromium scene rendered clear, snowy and elevated views with zero console errors. The integrated lakeside chase composition and its frame timing are under review.
+
+## R40 civil works and platform activity
+
+- Added rock and soil variation along exposed slopes, roofs built over the mapped building footprints, tunnel backfill with continuous terrain materials, and reflective water colors based on the mapped shoreline and elevation data. Platform surfaces and furnishings follow mapped material and amenity tags.
+- Waiting passengers occupy the mapped deck. They walk to car door sills supplied by the stopped consist and stay on the platform if no open door is reachable.
+- Checked all five Evanger–Voss tiles with polished scenery, using 6,699 trackbed samples and 131,535 coach-envelope probes. The maximum bed gap was 0.316 m, with no missing samples or envelope intersections. Five focused roof and boarding tests passed. Final camera captures and planar shoreline reflections are separate follow-up work.

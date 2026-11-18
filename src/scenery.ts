@@ -26,6 +26,13 @@ import {
 } from 'three';
 import type { Intersection, Material, Texture } from 'three';
 import type { Rail } from './rail';
+import { gabledRoof } from './roof.ts';
+import type { GabledRoof } from './roof.ts';
+import { blendExposedRock, civilTexture } from './scenery-materials.ts';
+import { createVegetation } from './vegetation.ts';
+import type { VegetationOptions } from './vegetation.ts';
+import { createPassengers } from './passengers.ts';
+import type { PassengerPlatform } from './passengers.ts';
 import { groundHeight, type LocalPoint, type TrackSpan, type WorldData } from './world-data.ts';
 
 type Weather = 'clear' | 'rain' | 'snow';
@@ -328,10 +335,34 @@ function gradedHeight(data: WorldData, nearby: ReturnType<typeof routeIndex>, x:
   return source + (trackbed - source) * formation * apron;
 }
 
+type TerrainPaint = (x: number, z: number, slope: number, out: Color) => number;
+
+function terrainPalette(data: WorldData, nearby: ReturnType<typeof routeIndex>, polished: boolean): TerrainPaint {
+  const grass = new Color(0xb8bd90);
+  const rock = new Color(0xc1b4a5);
+  const lowland = new Color(0xd4d7aa);
+  const spruceShade = new Color(0x5e7755);
+  const cover = forestCover(data);
+  return (x, z, slope, soil) => {
+    const field = Math.sin(x * 0.029 + Math.sin(z * 0.008)) * Math.cos(z * 0.034 - Math.sin(x * 0.017));
+    soil.copy(grass).lerp(lowland, 0.45 + field * 0.35).lerp(rock, smoothstep((slope - 4) / 19));
+    const forest = cover(x, z);
+    soil.lerp(spruceShade, forest * 0.7);
+    if (!polished) return 0;
+    const gradeFace = smoothstep((slope - 4.5) / 12) * (1 - forest * 0.56);
+    const track = nearby(x, z);
+    const shoulder = track && !track.span.bridge && (!track.span.tunnel || track.structureDistance < 8)
+      ? (1 - smoothstep((track.distance - 3.5) / 6)) * 0.72 : 0;
+    return Math.max(gradeFace * (0.79 + 0.19 * field), shoulder);
+  };
+}
+
 function createTerrain(
   data: WorldData,
   nearby: ReturnType<typeof routeIndex>,
   surface: MeshStandardMaterial,
+  paint: TerrainPaint,
+  exposedRock: boolean,
   ownsCell?: (east: number, worldZ: number) => boolean,
 ) {
   const group = new Group();
@@ -340,11 +371,6 @@ function createTerrain(
   const { width, height, spacing, east, north } = terrain;
   const tileCells = Math.max(8, Math.round(550 / spacing));
   const grade = (x: number, z: number) => gradedHeight(data, nearby, x, z);
-  const grass = new Color(0xb8bd90);
-  const rock = new Color(0xc1b4a5);
-  const lowland = new Color(0xd4d7aa);
-  const spruceShade = new Color(0x5e7755);
-  const cover = forestCover(data);
   const soil = new Color();
   const fine = Math.max(4, Math.ceil(spacing / 3));
   const columns = width - 1;
@@ -369,6 +395,7 @@ function createTerrain(
       const indices: number[] = [];
       const colors: number[] = [];
       const normals: number[] = [];
+      const rockExposure: number[] = [];
       const uv: number[] = [];
       const cached = new Map<number, number>();
       const vertex = (col: number, row: number, x: number, y: number, resolution: number) => {
@@ -403,10 +430,8 @@ function createTerrain(
         const length = Math.hypot(dx, 6, dz);
         normals.push(-dx / length, 6 / length, -dz / length);
         const slope = 2 * (Math.abs(dx) + Math.abs(dz));
-        const field = Math.sin(worldX * 0.029 + Math.sin(worldZ * 0.008)) *
-          Math.cos(worldZ * 0.034 - Math.sin(worldX * 0.017));
-        soil.copy(grass).lerp(lowland, 0.45 + field * 0.35).lerp(rock, smoothstep((slope - 4) / 19));
-        soil.lerp(spruceShade, cover(worldX, worldZ) * 0.7);
+        const exposure = paint(worldX, worldZ, slope, soil);
+        if (exposedRock) rockExposure.push(exposure);
         colors.push(soil.r, soil.g, soil.b);
         cached.set(key, index);
         return index;
@@ -448,6 +473,7 @@ function createTerrain(
       }
       if (indices.length === 0) continue;
       const tile = mesh(vertices, indices, surface, colors, uv, normals);
+      if (exposedRock) tile.geometry.setAttribute('rockExposure', new Float32BufferAttribute(rockExposure, 1));
       tile.geometry.computeBoundingSphere();
       tile.geometry.computeBoundingBox();
       group.add(tile);
@@ -462,20 +488,27 @@ function crossSection(
   section: [offset: number, height: number][],
   surface: MeshStandardMaterial,
   spacing = 2,
+  wrapSurface = false,
 ) {
   const vertices: number[] = [];
   const indices: number[] = [];
   const uv: number[] = [];
   const rows = Math.max(1, Math.ceil((span.end - span.start) / spacing));
   const count = section.length;
+  const arcLength = wrapSurface ? section.reduce<number[]>((lengths, [x, y], index) => {
+    const previous = section[index - 1];
+    lengths.push(previous ? lengths[index - 1] + Math.hypot(x - previous[0], y - previous[1]) : 0);
+    return lengths;
+  }, []) : undefined;
   for (let row = 0; row <= rows; row++) {
     const distance = span.start + (span.end - span.start) * row / rows;
     const { position, tangent, cant } = rail.pose(distance);
     const axis = new Vector3().crossVectors(tangent, UP).normalize();
-    for (const [offset, height] of section) {
+    for (let index = 0; index < section.length; index++) {
+      const [offset, height] = section[index];
       const point = position.clone().addScaledVector(axis, offset);
       vertices.push(point.x, point.y + height + Math.sin(cant) * offset, point.z);
-      uv.push(offset / 2, distance / 2);
+      uv.push((arcLength?.[index] ?? offset) / 2, distance / 2);
     }
     if (row === rows) continue;
     for (let col = 0; col < count - 1; col++) {
@@ -498,6 +531,82 @@ function spatialBatches<T>(values: readonly T[], size: number, point: (value: T)
   return [...groups.values()];
 }
 
+function addPortalBackfill(
+  group: Group,
+  data: WorldData,
+  rail: Rail,
+  nearby: ReturnType<typeof routeIndex>,
+  span: { start: number; end: number },
+  mouth: number,
+  coverMaterial: MeshStandardMaterial,
+  frontMaterial: MeshStandardMaterial,
+  paint: TerrainPaint,
+) {
+  const offsets = [-9, -7.6, -6.2, -4.75, -4.45, -3.55, -2.35, -1.2, 0, 1.2, 2.35, 3.55, 4.45, 4.75, 6.2, 7.6, 9];
+  const direction = mouth === span.start ? 1 : -1;
+  const depth = Math.min(45, (span.end - span.start) * 0.5);
+  if (depth <= 0.8) return;
+  const rows = Math.ceil(depth / 1.4);
+  const vertices: number[] = [];
+  const colors: number[] = [];
+  const rockExposure: number[] = [];
+  const uv: number[] = [];
+  const indices: number[] = [];
+  const faceVertices: number[] = [];
+  const faceUv: number[] = [];
+  const faceIndices: number[] = [];
+  const tint = new Color();
+  const outerWidth = TUNNEL_HALF_WIDTH * 1.13;
+
+  for (let row = 0; row <= rows; row++) {
+    const d = mouth + direction * (0.04 + (depth - 0.04) * row / rows);
+    const { position, tangent, cant } = rail.pose(d);
+    const axis = tangent.cross(UP).normalize();
+    for (let column = 0; column < offsets.length; column++) {
+      const offset = offsets[column];
+      const radius = Math.abs(offset);
+      const point = position.clone().addScaledVector(axis, offset);
+      const sourced = elevationAt(data, point.x, point.z);
+      const graded = gradedHeight(data, nearby, point.x, point.z);
+      const roof = position.y + TUNNEL_SPRINGLINE * 1.1 + 0.05 + Math.sin(cant) * offset
+        + TUNNEL_RISE * 1.1 * Math.sqrt(Math.max(0, 1 - (radius / outerWidth) ** 2));
+      const rockLip = roof + 0.20 + 0.32 * Math.sin(Math.PI * row / rows);
+      const lateral = 1 - smoothstep((radius - outerWidth) / (9 - outerWidth));
+      const natural = graded + (sourced - graded) * lateral;
+      const shaped = natural + Math.max(0, rockLip - natural) * lateral + 0.024;
+      vertices.push(point.x, shaped, point.z);
+      uv.push(point.x / 9, point.z / 9);
+      const slope = 2 * (Math.abs(gradedHeight(data, nearby, point.x + 3, point.z) - gradedHeight(data, nearby, point.x - 3, point.z))
+        + Math.abs(gradedHeight(data, nearby, point.x, point.z + 3) - gradedHeight(data, nearby, point.x, point.z - 3)));
+      const exposure = paint(point.x, point.z, slope, tint);
+      const freshCut = Math.max(0, 1 - row / rows * 2.4) * lateral * 0.75;
+      rockExposure.push(Math.max(exposure, freshCut));
+      colors.push(tint.r, tint.g, tint.b);
+      if (row < rows && column + 1 < offsets.length) {
+        const index = row * offsets.length + column;
+        const next = index + offsets.length;
+        if (direction > 0) indices.push(index, index + 1, next, index + 1, next + 1, next);
+        else indices.push(index, next, index + 1, index + 1, next, next + 1);
+      }
+      if (row === 0) {
+        const lower = radius <= outerWidth + 0.001 ? roof : graded;
+        faceVertices.push(point.x, lower, point.z, point.x, Math.max(shaped, lower + 0.025), point.z);
+        faceUv.push(offset / 2.1, lower / 2.1, offset / 2.1, shaped / 2.1);
+        if (column + 1 < offsets.length) {
+          const index = column * 2;
+          faceIndices.push(index, index + 1, index + 2, index + 1, index + 3, index + 2);
+        }
+      }
+    }
+  }
+  const fill = mesh(vertices, indices, coverMaterial, colors, uv);
+  fill.geometry.setAttribute('rockExposure', new Float32BufferAttribute(rockExposure, 1));
+  const frontage = mesh(faceVertices, faceIndices, frontMaterial, undefined, faceUv);
+  fill.name = frontage.name = 'Tunnel portal';
+  fill.castShadow = frontage.castShadow = true;
+  group.add(fill, frontage);
+}
+
 function addTrack(
   group: Group,
   data: WorldData,
@@ -505,6 +614,7 @@ function addTrack(
   ballast: MeshStandardMaterial,
   concrete: MeshStandardMaterial,
   nearby: ReturnType<typeof routeIndex>,
+  portalTerrain?: { surface: MeshStandardMaterial; paint: TerrainPaint },
 ) {
   const full = { start: 0, end: rail.length };
   const steel = material(0x555d61, 0.32, 0.82);
@@ -619,8 +729,16 @@ function addTrack(
     conductors.push(beam(a, b, 0.021), beam(aboveA, aboveB, 0.016), beam(a, aboveA, 0.012));
   }
 
-  const lining = material(0x615e55, 0.95);
-  const tunnelSurface = material(0x403e3a, 0.96);
+  const lining = material(portalTerrain ? 0xb6aea0 : 0x615e55, 0.95);
+  const tunnelSurface = material(portalTerrain ? 0x6b6862 : 0x403e3a, 0.96);
+  if (portalTerrain) {
+    lining.map = concrete.map;
+    lining.bumpMap = concrete.bumpMap;
+    lining.bumpScale = 0.048;
+    tunnelSurface.map = concrete.map;
+    tunnelSurface.bumpMap = concrete.bumpMap;
+    tunnelSurface.bumpScale = 0.026;
+  }
   const insideSection: [number, number][] = Array.from({ length: 17 }, (_, i) => {
     const angle = Math.PI * i / 16;
     return [-TUNNEL_HALF_WIDTH * Math.cos(angle), TUNNEL_SPRINGLINE + TUNNEL_RISE * Math.sin(angle)];
@@ -669,10 +787,11 @@ function addTrack(
         }
       }
     } else {
-      const bore = crossSection(rail, span, insideSection, tunnelSurface, 3);
+      const bore = crossSection(rail, span, insideSection, tunnelSurface, 3, Boolean(portalTerrain));
       bore.name = 'Tunnel bore';
+      const floorHeight = portalTerrain ? -0.26 : -0.48;
       const floor = crossSection(rail, span,
-        [[-TUNNEL_HALF_WIDTH - 0.02, -0.48], [TUNNEL_HALF_WIDTH + 0.02, -0.48]], tunnelSurface, 3);
+        [[-TUNNEL_HALF_WIDTH - 0.02, floorHeight], [TUNNEL_HALF_WIDTH + 0.02, floorHeight]], tunnelSurface, 3);
       floor.name = 'Tunnel bore';
       group.add(bore, floor);
       const outsideSection = insideSection.map(([x, y]): [number, number] => [x * 1.13, y * 1.1 + 0.05]);
@@ -685,18 +804,24 @@ function addTrack(
         const lateral = tangent.cross(UP).normalize();
         const vertices: number[] = [];
         const indices: number[] = [];
+        const uv: number[] = [];
         for (let i = 0; i < insideSection.length; i++) {
           for (const [x, y] of [insideSection[i], outsideSection[i]]) {
             const point = position.clone().addScaledVector(lateral, x);
             vertices.push(point.x, point.y + y + Math.sin(cant) * x, point.z);
+            uv.push(x / 1.9, y / 1.9);
           }
           if (i + 1 === insideSection.length) continue;
           const first = i * 2;
           indices.push(first, first + 1, first + 2, first + 1, first + 3, first + 2);
         }
-        const frontage = mesh(vertices, indices, lining);
+        const frontage = mesh(vertices, indices, lining, undefined, uv);
         frontage.name = 'Tunnel portal';
+        frontage.castShadow = Boolean(portalTerrain);
         group.add(portal, frontage);
+        if (portalTerrain) {
+          addPortalBackfill(group, data, rail, nearby, span, end, portalTerrain.surface, lining, portalTerrain.paint);
+        }
       }
     }
   }
@@ -851,6 +976,7 @@ type BuildingBatches = {
   roofs: number[];
   roofIndices: number[];
   roofUv: number[];
+  roofColors: number[];
 };
 
 function appendWall(
@@ -899,7 +1025,7 @@ function appendRailClearWall(
   }
 }
 
-function appendRoof(batches: BuildingBatches, points: LocalPoint[], height: number, rise: number, holes: LocalPoint[][]) {
+function appendRoof(batches: BuildingBatches, points: LocalPoint[], height: number, rise: number, holes: LocalPoint[][], color?: Color) {
   const index = batches.roofs.length / 3;
   const turns = points.map(([x, y], step) => {
     const [a, b] = points[(step + 1) % points.length];
@@ -911,6 +1037,7 @@ function appendRoof(batches: BuildingBatches, points: LocalPoint[], height: numb
     for (const [x, y] of [...points, ...holes.flat()]) {
       batches.roofs.push(x, height, -y);
       batches.roofUv.push(x / 2.7, y / 2.7);
+      if (color) batches.roofColors.push(color.r, color.g, color.b);
     }
     for (const corner of triangles(points, holes)) batches.roofIndices.push(index + corner);
     return;
@@ -923,10 +1050,12 @@ function appendRoof(batches: BuildingBatches, points: LocalPoint[], height: numb
   for (const [x, y] of points) {
     batches.roofs.push(x, height, -y);
     batches.roofUv.push(x / 2.7, y / 2.7);
+    if (color) batches.roofColors.push(color.r, color.g, color.b);
   }
   for (const [x, y] of inner) {
     batches.roofs.push(x, height + rise, -y);
     batches.roofUv.push(x / 2.7, y / 2.7);
+    if (color) batches.roofColors.push(color.r, color.g, color.b);
   }
   for (let outward = 0; outward < points.length; outward++) {
     const next = (outward + 1) % points.length;
@@ -937,6 +1066,29 @@ function appendRoof(batches: BuildingBatches, points: LocalPoint[], height: numb
   for (const corner of triangles(inner)) batches.roofIndices.push(index + points.length + corner);
 }
 
+function appendGabledRoof(batches: BuildingBatches, roof: GabledRoof, height: number, color: Color, siding: Color) {
+  for (const face of roof.faces) {
+    const base = batches.roofs.length / 3;
+    for (const point of face) {
+      const [x, y] = point;
+      const [across, run] = roof.uvAt(point);
+      batches.roofs.push(x, height + roof.heightAt(point), -y);
+      batches.roofUv.push(across / 2.7, run / 2.7);
+      batches.roofColors.push(color.r, color.g, color.b);
+    }
+    for (let corner = 1; corner + 1 < face.length; corner++) {
+      batches.roofIndices.push(base, base + corner, base + corner + 1);
+    }
+  }
+  for (let index = 0; index < roof.rim.length; index++) {
+    const a = roof.rim[index];
+    const b = roof.rim[(index + 1) % roof.rim.length];
+    const start = roof.heightAt(a);
+    const finish = roof.heightAt(b);
+    if (Math.max(start, finish) > 0.003) appendWall(batches, a, b, height, height + start, siding, height, height + finish);
+  }
+}
+
 function addBuildings(
   group: Group,
   data: WorldData,
@@ -944,9 +1096,15 @@ function addBuildings(
   roofsSurface: MeshStandardMaterial,
   siding?: Texture,
   nearby?: ReturnType<typeof routeIndex>,
+  polished = false,
 ) {
   const facade = material(0xffffff);
   facade.map = siding ?? null;
+  if (polished) {
+    facade.bumpMap = facade.map;
+    facade.bumpScale = 0.022;
+    roofsSurface.vertexColors = true;
+  }
   facade.vertexColors = true;
   facade.side = DoubleSide;
   roofsSurface.side = DoubleSide;
@@ -954,7 +1112,7 @@ function addBuildings(
   const large = buildings.length > 1800;
   const batches = large ? spatialBatches(buildings, 340, feature => feature.points[0]) : [buildings];
   for (const batch of batches) {
-    addBuildingCluster(group, data, batch, facade, windowsSurface, roofsSurface, nearby, large);
+    addBuildingCluster(group, data, batch, facade, windowsSurface, roofsSurface, nearby, large, polished);
   }
 }
 
@@ -967,10 +1125,14 @@ function addBuildingCluster(
   roofsSurface: MeshStandardMaterial,
   nearby: ReturnType<typeof routeIndex> | undefined,
   large: boolean,
+  polished: boolean,
 ) {
   const buildingWindows: Transform[] = [];
   const frames: Transform[] = [];
-  const batches: BuildingBatches = { walls: [], wallIndices: [], wallUv: [], colors: [], roofs: [], roofIndices: [], roofUv: [] };
+  const muntins: Transform[] = [];
+  const batches: BuildingBatches = {
+    walls: [], wallIndices: [], wallUv: [], colors: [], roofs: [], roofIndices: [], roofUv: [], roofColors: [],
+  };
   const paint = [0xb97b57, 0xe0d0b1, 0xbfc3b6, 0x9b5542, 0xaaa8a0, 0xb38d69, 0xe6d7c6];
 
   for (const feature of features) {
@@ -987,9 +1149,14 @@ function addBuildingCluster(
     const inferredHeight = canopy ? 3.8 : 2.75 * levels;
     const structureHeight = taggedHeight > Math.max(1, minHeight) ? taggedHeight : minHeight + inferredHeight;
     const railBelow = nearby?.footprintRailHeights(outline);
-    const roofRise = canopy || feature.tags['roof:shape'] === 'flat' || outline.length > 10
-      ? 0 : Math.min(1.9, structureHeight * 0.23);
-    const roofElevation = ground + structureHeight;
+    const roofType = feature.tags['roof:shape'];
+    const holes = (feature.holes ?? []).map(polygon).filter(hole => hole.length >= 3);
+    const houseScale = polished && outline.every(([x, y]) => Math.hypot(x - center[0], y - center[1]) < 21);
+    const gabled = polished && !canopy && !holes.length && (roofType === 'gabled' || !roofType && houseScale);
+    const sourceRise = Number.parseFloat(feature.tags['roof:height'] ?? '');
+    const roofRise = gabled ? (sourceRise > 0.2 && sourceRise < 9 ? sourceRise : Math.min(3.4, Math.max(0.8, structureHeight * 0.41)))
+      : canopy || roofType === 'flat' || outline.length > 10 ? 0 : Math.min(1.9, structureHeight * 0.23);
+    const roofElevation = ground + structureHeight - (gabled && taggedHeight > minHeight + roofRise ? roofRise : 0);
     const height = railBelow && roofElevation + roofRise > railBelow.low + 0.15
       ? Math.max(roofElevation, railBelow.high + STRUCTURE_CLEARANCE_HEIGHT + 0.25) : roofElevation;
     const base = canopy ? height - 0.23 : minHeight > 0 ? ground + minHeight
@@ -1032,16 +1199,32 @@ function addBuildingCluster(
             scale: new Vector3(0.93, 1.07, 0.16),
             color: new Color().setScalar(0.62 + random() * 0.38),
           });
+          if (polished && (adjacent?.distance ?? Infinity) < 36) {
+            muntins.push(
+              { position, rotation, scale: new Vector3(0.034, 1.06, 0.184) },
+              { position, rotation, scale: new Vector3(0.93, 0.032, 0.184) },
+              {
+                position: position.clone().add(new Vector3(0, -0.57, 0)),
+                rotation,
+                scale: new Vector3(1.17, 0.075, 0.23),
+              },
+            );
+          }
         }
       }
     }
-    const holes = (feature.holes ?? []).map(polygon).filter(hole => hole.length >= 3);
-    appendRoof(batches, outline, height, roofRise, holes);
+    const taggedRoofColor = feature.tags['roof:colour'];
+    const roofPalette = [0x655c58, 0x483e3f, 0x73706d, 0x6a4943, 0x514b49, 0x777974];
+    const roofColor = polished ? new Color(taggedRoofColor && /^#[0-9a-f]{6}$/i.test(taggedRoofColor)
+      ? taggedRoofColor : roofPalette[Math.floor(random() * roofPalette.length)]) : undefined;
+    const roof = gabled ? gabledRoof(outline, roofRise, feature.tags['roof:orientation'] === 'across') : undefined;
+    if (roof && roofColor) appendGabledRoof(batches, roof, height, roofColor, color);
+    else appendRoof(batches, outline, height, roofRise, holes, roofColor);
   }
 
   if (batches.walls.length) {
     const walls = mesh(batches.walls, batches.wallIndices, facade, batches.colors, batches.wallUv);
-    const roof = mesh(batches.roofs, batches.roofIndices, roofsSurface, undefined, batches.roofUv);
+    const roof = mesh(batches.roofs, batches.roofIndices, roofsSurface, polished ? batches.roofColors : undefined, batches.roofUv);
     walls.name = 'OSM building walls';
     roof.name = 'OSM building roofs';
     walls.castShadow = roof.castShadow = true;
@@ -1049,7 +1232,8 @@ function addBuildingCluster(
   }
   if (buildingWindows.length) {
     const box = new BoxGeometry();
-    group.add(aggregate(box, material(0x8c8580), frames), aggregate(box, windowsSurface, buildingWindows));
+    group.add(aggregate(box, material(polished ? 0xb3a99a : 0x8c8580), frames), aggregate(box, windowsSurface, buildingWindows));
+    if (muntins.length) group.add(aggregate(box, material(0xd4d2c1), muntins));
   }
 }
 
@@ -1060,7 +1244,10 @@ function platformDeck(
   followsRail: boolean,
 ) {
   const shape = triangles(outline);
-  if (!followsRail) return mesh(outline.flatMap(([x, y]) => [x, levelAt(x, -y), -y]), shape, surface);
+  if (!followsRail) {
+    return mesh(outline.flatMap(([x, y]) => [x, levelAt(x, -y), -y]), shape, surface, undefined,
+      outline.flatMap(([x, y]) => [x / 3.8, y / 3.8]));
+  }
   const points = [...outline];
   const indices: number[] = [];
   const split = (a: number, b: number, c: number) => {
@@ -1085,7 +1272,8 @@ function platformDeck(
     split(middle, right, opposite);
   };
   for (let index = 0; index < shape.length; index += 3) split(shape[index], shape[index + 1], shape[index + 2]);
-  return mesh(points.flatMap(([x, y]) => [x, levelAt(x, -y), -y]), indices, surface);
+  return mesh(points.flatMap(([x, y]) => [x, levelAt(x, -y), -y]), indices, surface, undefined,
+    points.flatMap(([x, y]) => [x / 3.8, y / 3.8]));
 }
 
 function platformLoadingGauge(outline: LocalPoint[], nearby: ReturnType<typeof routeIndex>) {
@@ -1114,6 +1302,74 @@ function platformLoadingGauge(outline: LocalPoint[], nearby: ReturnType<typeof r
   });
 }
 
+type PlatformAmenities = { wood: Transform[]; steel: Transform[]; glass: Transform[]; bins: Transform[] };
+
+function addPlatformAmenities(
+  parts: PlatformAmenities,
+  platform: PassengerPlatform,
+  tags: Record<string, string>,
+  rail: Rail,
+  stop: number,
+  nearby: ReturnType<typeof routeIndex>,
+) {
+  if (!platform.followsRail || !['bench', 'bin', 'shelter'].some(tag => tags[tag] === 'yes')) return;
+  const origin = rail.position(stop);
+  const along = origin.clone().sub(rail.position(stop - 8)).setY(0).normalize();
+  if (!along.lengthSq()) return;
+  const lateral = along.clone().cross(UP);
+  const rotation = new Quaternion().setFromUnitVectors(X, along);
+  const plan = [-16, -10, 8, 16, 26, -27, 0].flatMap(distance => [3.1, 3.7, 4.3, 5.1, 6.2, 7.5]
+    .flatMap(setback => [setback, -setback].map(offset =>
+      origin.clone().addScaledVector(along, distance).addScaledVector(lateral, offset),
+    )));
+  const used = platform.occupied ??= [];
+  const pick = (halfLength: number, halfWidth: number) => {
+    const radius = Math.hypot(halfLength, halfWidth) + 0.28;
+    const site = plan.find(point => used.every(other => other.position.distanceToSquared(point) > (other.radius + radius) ** 2)
+      && [-halfLength, 0, halfLength].every(x => [-halfWidth, 0, halfWidth].every(z => {
+        const corner = point.clone().addScaledVector(along, x).addScaledVector(lateral, z);
+        return inside([corner.x, -corner.z], platform.outline)
+          && (nearby(corner.x, corner.z)?.distance ?? Infinity) >= 2.28;
+      })));
+    if (!site) return;
+    const seated = site.clone().setY(platform.levelAt(site.x, site.z));
+    used.push({ position: seated, radius });
+    return seated;
+  };
+  const fixture = (site: Vector3, x: number, y: number, z: number, length: number, height: number, depth: number): Transform => ({
+    position: site.clone().addScaledVector(along, x).addScaledVector(lateral, z).add(new Vector3(0, y, 0)),
+    scale: new Vector3(length, height, depth),
+    rotation,
+  });
+
+  const shelter = tags.shelter === 'yes' ? pick(1.46, 0.82) : undefined;
+  if (shelter) {
+    for (const x of [-1.31, 1.31]) {
+      for (const z of [-0.73, 0.73]) parts.steel.push(fixture(shelter, x, 1.14, z, 0.09, 2.36, 0.09));
+      parts.glass.push(fixture(shelter, x, 1.32, 0, 0.025, 1.62, 1.38));
+    }
+    for (const y of [0.54, 2.12]) parts.steel.push(fixture(shelter, 0, y, -0.73, 2.72, 0.066, 0.08));
+    parts.glass.push(fixture(shelter, 0, 1.33, -0.73, 2.61, 1.57, 0.025));
+    parts.steel.push(fixture(shelter, 0, 2.37, 0, 2.92, 0.14, 1.66));
+  }
+
+  const bench = tags.bench === 'yes' ? pick(1.01, 0.46) : undefined;
+  if (bench) {
+    for (const x of [-0.67, 0.67]) {
+      parts.steel.push(fixture(bench, x, 0.29, 0, 0.065, 0.59, 0.32));
+      parts.steel.push(fixture(bench, x, 0.67, -0.24, 0.057, 0.62, 0.06));
+    }
+    for (const z of [-0.19, -0.064, 0.064, 0.19]) parts.wood.push(fixture(bench, 0, 0.48, z, 1.84, 0.058, 0.107));
+    for (const y of [0.70, 0.84, 0.98]) parts.wood.push(fixture(bench, 0, y, -0.27, 1.84, 0.10, 0.049));
+  }
+
+  const bin = tags.bin === 'yes' ? pick(0.33, 0.33) : undefined;
+  if (bin) {
+    parts.bins.push(fixture(bin, 0, 0.44, 0, 0.24, 0.88, 0.24));
+    parts.steel.push(fixture(bin, 0, 0.90, 0, 0.49, 0.07, 0.49));
+  }
+}
+
 function addPlatforms(
   group: Group,
   data: WorldData,
@@ -1121,15 +1377,29 @@ function addPlatforms(
   concrete: MeshStandardMaterial,
   platformLights: MeshStandardMaterial,
   nearby: ReturnType<typeof routeIndex>,
+  polished = false,
+  siding?: Texture,
 ) {
-  const topMaterial = material(0x696b67, 0.91);
-  topMaterial.side = DoubleSide;
+  const topMaterial = material(polished ? 0x8e918d : 0x696b67, 0.91);
+  const wood = material(0xac9590, 0.83);
+  if (polished) {
+    topMaterial.map = concrete.map;
+    topMaterial.bumpMap = concrete.bumpMap;
+    topMaterial.bumpScale = 0.037;
+    wood.map = siding ?? null;
+    wood.bumpMap = wood.map;
+    wood.bumpScale = 0.015;
+  }
+  const platformSnow = polished ? [coatedBySnow(topMaterial, 0.74), coatedBySnow(wood, 0.69)] : [];
+  topMaterial.side = wood.side = DoubleSide;
   concrete.side = DoubleSide;
   const stripes: Transform[] = [];
+  const tactilePavers: Transform[] = [];
   const posts: Transform[] = [];
   const lamps: Transform[] = [];
   const bulbs: PointLight[] = [];
-  const platforms: { outline: LocalPoint[]; levelAt: (x: number, z: number) => number }[] = [];
+  const platforms: PassengerPlatform[] = [];
+  const amenities: PlatformAmenities = { wood: [], steel: [], glass: [], bins: [] };
   const stripe = material(0xd5bb6c, 0.85);
   const metal = material(0x3d4950, 0.63, 0.46);
   const geometry = new BoxGeometry();
@@ -1158,9 +1428,15 @@ function addPlatforms(
       const fade = smoothstep((20 - track.distance) / 8);
       return ground + (track.height + platformRise - ground) * fade;
     };
-    platforms.push({ outline, levelAt });
-    const top = platformDeck(outline, levelAt, topMaterial, followsRail);
-    const trim: BuildingBatches = { walls: [], wallIndices: [], wallUv: [], colors: [], roofs: [], roofIndices: [], roofUv: [] };
+    const platform = { outline, levelAt, followsRail };
+    platforms.push(platform);
+    if (polished && station && Math.hypot(center[0] - station.position[0], center[1] - station.position[1]) < 115) {
+      addPlatformAmenities(amenities, platform, feature.tags, rail, station.stopDistance, nearby);
+    }
+    const top = platformDeck(outline, levelAt, polished && feature.tags.surface === 'wood' ? wood : topMaterial, followsRail);
+    const trim: BuildingBatches = {
+      walls: [], wallIndices: [], wallUv: [], colors: [], roofs: [], roofIndices: [], roofUv: [], roofColors: [],
+    };
     const grey = new Color(0xffffff);
     for (let index = 0; index < outline.length; index++) {
       const a = outline[index];
@@ -1185,11 +1461,21 @@ function addPlatforms(
         appendWall(trim, [first.x, -first.z], [last.x, -last.z], bottom(first), first.y, grey, bottom(last), last.y);
         if (length <= 1) continue;
         const stripeDirection = last.clone().sub(first);
+        const midpoint = first.clone().lerp(last, 0.5);
+        const width = stripeDirection.length();
+        const rotation = new Quaternion().setFromUnitVectors(X, stripeDirection.normalize());
         stripes.push({
-          position: first.clone().lerp(last, 0.5).addScaledVector(normal, 0.18).add(new Vector3(0, 0.008, 0)),
-          scale: new Vector3(stripeDirection.length(), 0.014, 0.115),
-          rotation: new Quaternion().setFromUnitVectors(X, stripeDirection.normalize()),
+          position: midpoint.clone().addScaledVector(normal, 0.18).add(new Vector3(0, 0.008, 0)),
+          scale: new Vector3(width, 0.014, 0.115),
+          rotation,
         });
+        if (polished && feature.tags.tactile_paving === 'yes' && (nearby(midpoint.x, midpoint.z)?.distance ?? Infinity) < 3.05) {
+          const position = midpoint.clone().addScaledVector(normal, 0.39);
+          if (inside([position.x, -position.z], outline)) {
+            position.y = levelAt(position.x, position.z) + 0.012;
+            tactilePavers.push({ position, scale: new Vector3(width, 0.019, 0.26), rotation });
+          }
+        }
       }
 
     }
@@ -1225,7 +1511,7 @@ function addPlatforms(
         }
       }
     }
-    const edge = mesh(trim.walls, trim.wallIndices, concrete);
+    const edge = mesh(trim.walls, trim.wallIndices, concrete, undefined, trim.wallUv);
     top.name = 'Platform deck';
     edge.name = 'Platform edge';
     group.add(top, edge);
@@ -1309,7 +1595,60 @@ function addPlatforms(
       group.add(furniture);
     }
   }
-  return bulbs;
+  if (polished) {
+    const cedar = material(0x825a40, 0.77);
+    const shelterGlass = new MeshStandardMaterial({
+      color: 0x9bb1bb, roughness: 0.12, metalness: 0.05,
+      transparent: true, opacity: 0.29, depthWrite: false, side: DoubleSide,
+    });
+    const binPaint = material(0x465048, 0.68);
+    if (tactilePavers.length) {
+      const tactile = material(0xc7b58e, 0.82);
+      const pattern = texture(128, (context) => {
+        context.fillStyle = '#b6af9e';
+        context.fillRect(0, 0, 128, 128);
+        for (const y of [22, 64, 106]) {
+          for (const x of [24, 65, 107]) {
+            context.fillStyle = '#635c52';
+            context.beginPath();
+            context.ellipse(x, y + 1.7, 12, 10, 0, 0, Math.PI * 2);
+            context.fill();
+            context.fillStyle = '#d3cbba';
+            context.beginPath();
+            context.ellipse(x - 0.7, y - 0.7, 10.9, 8.8, 0, 0, Math.PI * 2);
+            context.fill();
+          }
+        }
+      });
+      pattern.repeat.set(7, 1);
+      tactile.map = tactile.bumpMap = pattern;
+      tactile.bumpScale = 0.006;
+      platformSnow.push(coatedBySnow(tactile, 0.57));
+      const row = aggregate(geometry, tactile, tactilePavers);
+      row.name = 'Platform furniture';
+      group.add(row);
+    }
+    for (const [surface, parts, shape] of [
+      [cedar, amenities.wood, geometry],
+      [metal, amenities.steel, geometry],
+      [shelterGlass, amenities.glass, geometry],
+      [binPaint, amenities.bins, new CylinderGeometry(1, 1, 1, 10)],
+    ] satisfies [MeshStandardMaterial, Transform[], BufferGeometry][]) {
+      if (!parts.length) continue;
+      const fixtures = aggregate(shape, surface, parts);
+      fixtures.name = 'Platform furniture';
+      fixtures.castShadow = !surface.transparent;
+      group.add(fixtures);
+    }
+  }
+  const setPlatformWeather = (weather: Weather) => {
+    for (const amount of platformSnow) amount.value = weather === 'snow' ? 1 : 0;
+    if (polished) {
+      topMaterial.roughness = weather === 'rain' ? 0.56 : 0.91;
+      wood.roughness = weather === 'rain' ? 0.51 : 0.83;
+    }
+  };
+  return { bulbs, platforms, setPlatformWeather };
 }
 
 function contours(data: WorldData, points: LocalPoint[]) {
@@ -1344,7 +1683,7 @@ function contours(data: WorldData, points: LocalPoint[]) {
   return result;
 }
 
-function addWater(group: Group, data: WorldData, surface: MeshStandardMaterial) {
+function addWater(group: Group, data: WorldData, surface: MeshStandardMaterial, polished = false) {
   for (const feature of data.features) {
     if (feature.type !== 'water') continue;
     const outline = contours(data, polygon(feature.points));
@@ -1355,7 +1694,33 @@ function addWater(group: Group, data: WorldData, surface: MeshStandardMaterial) 
     const rings = [...outline, ...holes.flat()];
     const vertices = rings.flatMap(([x, y]) => [x, waterLevel, -y]);
     const uv = rings.flatMap(([x, y]) => [x / 18, y / 18]);
-    const water = mesh(vertices, triangles(outline, holes), surface, undefined, uv);
+    const indices = triangles(outline, holes);
+    let faces = indices;
+    const colors: number[] = [];
+    if (polished) {
+      const shore = new Color(0x97bab1);
+      const deep = new Color(0x526d82);
+      const tint = new Color();
+      const banks = [outline, ...holes];
+      for (let index = 0; index < rings.length; index++) colors.push(shore.r, shore.g, shore.b);
+      faces = [];
+      for (let index = 0; index < indices.length; index += 3) {
+        const a = indices[index];
+        const b = indices[index + 1];
+        const c = indices[index + 2];
+        const x = (rings[a][0] + rings[b][0] + rings[c][0]) / 3;
+        const y = (rings[a][1] + rings[b][1] + rings[c][1]) / 3;
+        const indexOfCenter = vertices.length / 3;
+        vertices.push(x, waterLevel, -y);
+        uv.push(x / 18, y / 18);
+        const level = waterLevel - elevationAt(data, x, -y);
+        const bank = banks.some(bank => nearBoundary(x, y, bank, 5));
+        tint.copy(shore).lerp(deep, Math.max(smoothstep((level + 0.25) / 2.4), bank ? 0.05 : 0.67));
+        colors.push(tint.r, tint.g, tint.b);
+        faces.push(a, b, indexOfCenter, b, c, indexOfCenter, c, a, indexOfCenter);
+      }
+    }
+    const water = mesh(vertices, faces, surface, polished ? colors : undefined, uv);
     water.receiveShadow = false;
     group.add(water);
   }
@@ -1873,9 +2238,11 @@ function waterNormals() {
 }
 
 export interface SceneryMaps {
+  polished?: boolean;
   grass?: Texture;
   ballast?: Texture;
   spruce?: Texture;
+  pineAndBirch?: Texture;
   siding?: Texture;
   roofing?: Texture;
 }
@@ -1889,6 +2256,9 @@ export interface SceneryPlacement {
 export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {}, placement?: SceneryPlacement) {
   const group = new Group();
   group.name = 'OpenStreetMap railway corridor';
+  const polished = maps.polished === true;
+  const exposedRock = polished ? civilTexture('rock') : undefined;
+  const concreteMap = polished ? civilTexture('concrete') : undefined;
   const ground = material(0xffffff, 0.95);
   ground.vertexColors = true;
   ground.map = maps.grass ?? groundTexture(false);
@@ -1903,62 +2273,88 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   ballast.map = maps.ballast ?? groundTexture(true);
   ballast.bumpMap = ballast.map;
   ballast.bumpScale = 0.05;
-  const concrete = material(0x8a8880, 0.86);
-  const roofs = material(maps.roofing ? 0xc9c0bb : 0x4b484a, 0.81);
+  const concrete = material(polished ? 0xa49e91 : 0x8a8880, 0.86);
+  if (concreteMap) {
+    concrete.map = concreteMap;
+    concrete.bumpMap = concreteMap;
+    concrete.bumpScale = 0.048;
+  }
+  const roofs = material(polished ? 0xe1dbd3 : maps.roofing ? 0xc9c0bb : 0x4b484a, 0.81);
   roofs.map = maps.roofing ?? null;
   roofs.bumpMap = roofs.map;
   roofs.bumpScale = 0.04;
-  const foliage = material(0xabbda2, 0.91);
-  foliage.side = DoubleSide;
-  foliage.vertexColors = true;
-  const spruceAlbedo = spruceTexture();
-  foliage.map = spruceAlbedo;
-  foliage.alphaTest = 0.36;
-  foliage.alphaToCoverage = true;
-  const distantFoliage = new MeshLambertMaterial({
-    color: 0xa6bb9d,
-    side: DoubleSide,
-    map: distantSpruceTexture(spruceAlbedo, maps.spruce),
-    alphaTest: 0.36,
-  });
-  const windows = material(0x46565b, 0.36, 0.25);
+  const foliage = polished ? undefined : material(0xabbda2, 0.91);
+  let distantFoliage: MeshLambertMaterial | undefined;
+  if (foliage) {
+    foliage.side = DoubleSide;
+    foliage.vertexColors = true;
+    const spruceAlbedo = spruceTexture();
+    foliage.map = spruceAlbedo;
+    foliage.alphaTest = 0.36;
+    foliage.alphaToCoverage = true;
+    distantFoliage = new MeshLambertMaterial({
+      color: 0xa6bb9d,
+      side: DoubleSide,
+      map: distantSpruceTexture(spruceAlbedo, maps.spruce),
+      alphaTest: 0.36,
+    });
+  }
+  const windows = material(polished ? 0x536773 : 0x46565b, polished ? 0.22 : 0.36, 0.25);
   windows.emissive.setHex(0xffb75b);
   const fixtures = material(0xf0d2a4, 0.57);
   fixtures.emissive.setHex(0xffc581);
-  const water = material(0x365762, 0.19, 0.05);
+  const water = material(polished ? 0x9bb1b5 : 0x365762, 0.19, 0.05);
   water.side = DoubleSide;
+  water.vertexColors = polished;
   water.normalMap = waterNormals();
   water.normalScale.set(0.22, 0.28);
-  water.envMapIntensity = 1.15;
+  water.envMapIntensity = polished ? 1.55 : 1.15;
 
   const snow = [coatedBySnow(ground, 0.92), coatedBySnow(distantGround, 0.92), coatedBySnow(ballast, 0.57),
-    coatedBySnow(foliage, 0.64, true), coatedBySnow(distantFoliage, 0.64, true),
     coatedBySnow(roofs, 0.87), coatedBySnow(concrete, 0.29)];
+  if (foliage && distantFoliage) snow.push(coatedBySnow(foliage, 0.64, true), coatedBySnow(distantFoliage, 0.64, true));
+  if (exposedRock) blendExposedRock(ground, exposedRock);
   const nearby = routeIndex(placement?.gradeRail ?? rail, placement?.gradeSpans ?? data.spans);
-  const terrain = createTerrain(data, nearby, ground, placement?.ownsCell);
+  const paint = terrainPalette(data, nearby, Boolean(exposedRock));
+  const terrain = createTerrain(data, nearby, ground, paint, Boolean(exposedRock), placement?.ownsCell);
   const terrainTiles = terrain.children.filter(tile => tile instanceof Mesh);
   group.add(terrain);
-  const applyTrackDetail = addTrack(group, data, rail, ballast, concrete, nearby);
+  const applyTrackDetail = addTrack(group, data, rail, ballast, concrete, nearby,
+    exposedRock ? { surface: ground, paint } : undefined);
   addParallelTracks(group, data, nearby, ballast);
-  addWater(group, data, water);
-  addBuildings(group, data, windows, roofs, maps.siding, nearby);
-  const applyForestDetail = addForests(group, data, nearby, foliage, distantFoliage, placement?.ownsCell);
-  const grass = addTracksideGrass(group, data, rail, nearby);
+  addWater(group, data, water, polished);
+  addBuildings(group, data, windows, roofs, maps.siding, nearby, polished);
+  const vegetation = polished ? createVegetation(data, rail, {
+    ownsCell: placement?.ownsCell,
+    heightAt: (x, z) => gradedHeight(data, nearby, x, z),
+    spruceImage: maps.spruce?.image as VegetationOptions['spruceImage'],
+    pineAndBirchImage: maps.pineAndBirch?.image as VegetationOptions['pineAndBirchImage'],
+  }) : undefined;
+  if (vegetation) group.add(vegetation.group);
+  const applyForestDetail = foliage && distantFoliage
+    ? addForests(group, data, nearby, foliage, distantFoliage, placement?.ownsCell) : undefined;
+  const grass = vegetation ? undefined : addTracksideGrass(group, data, rail, nearby);
   const setSignal = addSignals(group, data, nearby);
-  const bulbs = addPlatforms(group, data, rail, concrete, fixtures, nearby);
+  const { bulbs, platforms, setPlatformWeather } = addPlatforms(group, data, rail, concrete, fixtures, nearby, polished, maps.siding);
+  const passengers = polished ? createPassengers(data.stations, platforms, rail, placement?.ownsCell) : undefined;
+  if (passengers) group.add(passengers.group);
   group.traverse(object => {
     object.updateMatrix();
     object.matrixAutoUpdate = false;
   });
   group.updateMatrixWorld();
 
+  let activeWeather: Weather = 'clear';
   const setWeather = (weather: Weather) => {
-    grass.material.color.setHex(weather === 'snow' ? 0xa6ac91 : 0x89965a);
+    activeWeather = weather;
+    setPlatformWeather(weather);
+    grass?.material.color.setHex(weather === 'snow' ? 0xa6ac91 : 0x89965a);
     for (const amount of snow) amount.value = weather === 'snow' ? 1 : 0;
     ground.roughness = weather === 'rain' ? 0.63 : 0.95;
     ballast.roughness = weather === 'rain' ? 0.66 : 0.97;
     roofs.roughness = weather === 'rain' ? 0.42 : 0.81;
-    water.roughness = weather === 'rain' ? 0.33 : 0.2;
+    water.roughness = weather === 'rain' ? 0.33 : polished ? 0.14 : 0.2;
+    if (polished) water.normalScale.set(weather === 'rain' ? 0.58 : 0.29, weather === 'rain' ? 0.66 : 0.37);
     ground.color.setHex(weather === 'rain' ? 0xb0b5af : 0xffffff);
     distantGround.color.copy(ground.color);
   };
@@ -1971,13 +2367,15 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
       bulb.visible = false;
       bulb.intensity = night ? 31 : 0;
     }
-    water.color.setHex(night ? 0x20354b : 0x365762);
+    water.color.setHex(polished ? (night ? 0x63758b : 0x9bb1b5) : (night ? 0x20354b : 0x365762));
   };
   let waterTime = 0;
   const update = (seconds: number, camera: Vector3) => {
-    grass.applyDistance(camera);
+    grass?.applyDistance(camera);
     applyTrackDetail(camera);
-    applyForestDetail(camera);
+    applyForestDetail?.(camera);
+    vegetation?.update(camera, seconds, activeWeather);
+    passengers?.update(seconds, camera);
     for (const tile of terrainTiles) {
       const bounds = tile.geometry.boundingBox;
       const detailed = bounds && bounds.distanceToPoint(camera) <= 210;
@@ -1989,7 +2387,14 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   };
   setNight(false);
 
-  return { group, setWeather, setNight, setSignal, update };
+  const dispose = () => {
+    vegetation?.group.removeFromParent();
+    vegetation?.dispose();
+    passengers?.dispose();
+    exposedRock?.dispose();
+  };
+  const setBoardingDoors = (doorways: readonly Vector3[]) => passengers?.setDoors(doorways);
+  return { group, setWeather, setNight, setSignal, setBoardingDoors, update, dispose };
 }
 
 

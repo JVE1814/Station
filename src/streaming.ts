@@ -13,6 +13,7 @@ import type { SignalAspect } from './blocks';
 type TileScene = ReturnType<typeof createScenery>;
 
 function dispose(scene: TileScene, shared: Set<Texture>): void {
+  scene.dispose();
   const materials = new Set<import('three').Material>();
   const maps = new Set<Texture>();
   const geometries = new Set<import('three').BufferGeometry>();
@@ -63,6 +64,7 @@ export class SceneryStream {
   private readonly outlines = new Map<string, Vector3[]>();
   private weather: Weather = 'clear';
   private night = false;
+  private boardingDoors: readonly Vector3[] = [];
 
   constructor(
     private readonly tiles: readonly RouteTile[],
@@ -73,7 +75,7 @@ export class SceneryStream {
     private readonly onChange: () => void,
   ) {
     this.group.name = 'Streamed railway corridor';
-    this.sharedTextures = new Set(Object.values(maps));
+    this.sharedTextures = new Set(Object.values(maps).filter((value): value is Texture => value instanceof Texture));
     for (const tile of tiles) {
       const track = [];
       for (let distance = tile.start; distance < tile.end; distance += 65) track.push(mainRail.position(distance));
@@ -104,6 +106,12 @@ export class SceneryStream {
     if (this.signalAspects.get(id) === aspect) return;
     this.signalAspects.set(id, aspect);
     for (const tile of this.loaded.values()) tile.setSignal(aspect, id);
+  }
+
+  setBoardingDoors(doorways: readonly Vector3[]): void {
+    if (Boolean(this.boardingDoors.length) === Boolean(doorways.length)) return;
+    this.boardingDoors = doorways.map(door => door.clone());
+    for (const tile of this.loaded.values()) tile.setBoardingDoors(this.boardingDoors);
   }
 
   heightAt(x: number, z: number): number | undefined {
@@ -189,6 +197,7 @@ export class SceneryStream {
       const scenery = createScenery(world, new Rail(world.rail), this.maps, placement);
       scenery.setWeather(this.weather);
       scenery.setNight(this.night);
+      scenery.setBoardingDoors(this.boardingDoors);
       for (const [id, aspect] of this.signalAspects) scenery.setSignal(aspect, id);
       this.loaded.set(tile.id, scenery);
       this.terrain.set(tile.id, world.terrain);

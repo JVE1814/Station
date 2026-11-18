@@ -1,0 +1,746 @@
+import {
+  BufferGeometry, CanvasTexture, Color, DoubleSide, Float32BufferAttribute, Group,
+  InstancedBufferAttribute, InstancedMesh, MeshDepthMaterial, MeshLambertMaterial,
+  Object3D, RGBADepthPacking, SRGBColorSpace, Vector3,
+} from 'three';
+import type { Material, Texture } from 'three';
+import type { Rail } from './rail.ts';
+import { groundHeight } from './world-data.ts';
+import type { LocalPoint, TrackSpan, WorldData, WorldFeature } from './world-data.ts';
+
+export type VegetationWeather = 'clear' | 'rain' | 'snow';
+
+type TreeImage = CanvasImageSource & { width: number; height: number };
+
+export interface VegetationOptions {
+  ownsCell?: (east: number, worldZ: number) => boolean;
+  heightAt?: (east: number, worldZ: number) => number;
+  spruceImage?: TreeImage;
+  pineAndBirchImage?: TreeImage;
+}
+
+export type PlantKind = 'spruce' | 'pine' | 'birch' | 'willow' | 'grass' | 'fern' | 'fireweed';
+
+export interface Plant {
+  kind: PlantKind;
+  east: number;
+  north: number;
+  height: number;
+  width: number;
+  rotation: number;
+  tint: number;
+}
+
+const forest: readonly PlantKind[] = ['spruce', 'pine', 'birch'];
+const cells: readonly PlantKind[] = [...forest, 'willow', 'grass', 'fern', 'fireweed'];
+const cellWidth = 384;
+const atlasWidth = cellWidth * 4;
+const atlasHeight = cellWidth * 2;
+
+function hash(a: number, b: number, salt: number) {
+  let value = (Math.imul(a, 73856093) ^ Math.imul(b, 19349663) ^ Math.imul(salt, 83492791)) | 0;
+  value = Math.imul(value ^ value >>> 16, 0x21f0aaad);
+  value = Math.imul(value ^ value >>> 15, 0x735a2d97);
+  return ((value ^ value >>> 15) >>> 0) / 0x100000000;
+}
+
+function sequence(seed: number) {
+  let index = 0;
+  return () => hash(index++, seed, 77);
+}
+
+function contains(x: number, y: number, ring: readonly LocalPoint[]) {
+  let inside = false;
+  for (let current = 0, previous = ring.length - 1; current < ring.length; previous = current++) {
+    const [ax, ay] = ring[current];
+    const [bx, by] = ring[previous];
+    if ((ay > y) !== (by > y) && x < (bx - ax) * (y - ay) / (by - ay) + ax) inside = !inside;
+  }
+  return inside;
+}
+
+type Bounds = { minX: number; maxX: number; minY: number; maxY: number };
+
+function polygonBounds(points: readonly LocalPoint[]): Bounds {
+  return points.reduce((box, [east, north]) => ({
+    minX: Math.min(east, box.minX), maxX: Math.max(east, box.maxX),
+    minY: Math.min(north, box.minY), maxY: Math.max(north, box.maxY),
+  }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+}
+
+function inBounds(x: number, y: number, bounds: Bounds) {
+  return x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY;
+}
+
+class SpatialBins<T> {
+  private readonly bins = new Map<string, T[]>();
+  private readonly size: number;
+
+  constructor(size: number) {
+    this.size = size;
+  }
+
+  insert(value: T, bounds: Bounds) {
+    for (let i = Math.floor(bounds.minX / this.size); i <= Math.floor(bounds.maxX / this.size); i++) {
+      for (let j = Math.floor(bounds.minY / this.size); j <= Math.floor(bounds.maxY / this.size); j++) {
+        const key = `${i}:${j}`;
+        let values = this.bins.get(key);
+        if (!values) {
+          values = [];
+          this.bins.set(key, values);
+        }
+        values.push(value);
+      }
+    }
+  }
+
+  candidates(x: number, y: number): readonly T[] {
+    return this.bins.get(`${Math.floor(x / this.size)}:${Math.floor(y / this.size)}`) ?? [];
+  }
+}
+
+interface PlantingPolygon { feature: WorldFeature; bounds: Bounds }
+
+function collectPolygons(data: WorldData, extent: Bounds) {
+  const woods = new SpatialBins<PlantingPolygon>(240);
+  const open = new SpatialBins<PlantingPolygon>(120);
+  for (const feature of data.features) {
+    if (!['forest', 'building', 'platform', 'water'].includes(feature.type) || feature.points.length < 3) continue;
+    const bounds = polygonBounds(feature.points);
+    const clipped = {
+      minX: Math.max(bounds.minX, extent.minX), maxX: Math.min(bounds.maxX, extent.maxX),
+      minY: Math.max(bounds.minY, extent.minY), maxY: Math.min(bounds.maxY, extent.maxY),
+    };
+    if (clipped.minX > clipped.maxX || clipped.minY > clipped.maxY) continue;
+    (feature.type === 'forest' ? woods : open).insert({ feature, bounds }, clipped);
+  }
+  const enclosed = (east: number, north: number, polygon: PlantingPolygon) =>
+    inBounds(east, north, polygon.bounds) && contains(east, north, polygon.feature.points)
+      && !polygon.feature.holes?.some(hole => contains(east, north, hole));
+  return {
+    woodAt: (east: number, north: number) =>
+      woods.candidates(east, north).find(polygon => enclosed(east, north, polygon))?.feature,
+    excluded: (east: number, north: number) =>
+      open.candidates(east, north).some(polygon => enclosed(east, north, polygon)),
+  };
+}
+
+interface LineSegment {
+  x: number; y: number; dx: number; dy: number;
+}
+
+function collectSurfaceTrack(data: WorldData) {
+  const index = new SpatialBins<LineSegment>(56);
+  const insert = (a: LocalPoint, b: LocalPoint) => {
+    const padding = 48;
+    index.insert({ x: a[0], y: a[1], dx: b[0] - a[0], dy: b[1] - a[1] }, {
+      minX: Math.min(a[0], b[0]) - padding, maxX: Math.max(a[0], b[0]) + padding,
+      minY: Math.min(a[1], b[1]) - padding, maxY: Math.max(a[1], b[1]) + padding,
+    });
+  };
+  let spanIndex = 0;
+  for (let i = 1; i < data.rail.length; i++) {
+    const a = data.rail[i - 1];
+    const b = data.rail[i];
+    const chainage = (a.distance + b.distance) / 2;
+    while (spanIndex < data.spans.length - 1 && chainage >= data.spans[spanIndex].end) spanIndex++;
+    if (!data.spans[spanIndex]?.tunnel) insert([a.east, a.north], [b.east, b.north]);
+  }
+  for (const feature of data.features) {
+    if (feature.type !== 'track' || feature.tags.tunnel && feature.tags.tunnel !== 'no') continue;
+    for (let i = 1; i < feature.points.length; i++) insert(feature.points[i - 1], feature.points[i]);
+  }
+
+  return (east: number, north: number) => {
+    let nearest = Infinity;
+    for (const segment of index.candidates(east, north)) {
+      const { x, y, dx, dy } = segment;
+      const length = dx * dx + dy * dy;
+      const t = length > 0 ? Math.max(0, Math.min(1, ((east - x) * dx + (north - y) * dy) / length)) : 0;
+      nearest = Math.min(nearest, (east - x - dx * t) ** 2 + (north - y - dy * t) ** 2);
+    }
+    return Math.sqrt(nearest);
+  };
+}
+
+function treeKind(feature: WorldFeature, roll: number): PlantKind {
+  const leaf = feature.tags.leaf_type;
+  if (leaf === 'broadleaved') return 'birch';
+  if (leaf === 'needleleaved') return roll < 0.76 ? 'spruce' : 'pine';
+  if (leaf === 'mixed') return roll < 0.52 ? 'spruce' : roll < 0.75 ? 'pine' : 'birch';
+  return forest[roll < 0.68 ? 0 : roll < 0.87 ? 1 : 2];
+}
+
+export function placeVegetation(data: WorldData, rail: Rail, options: VegetationOptions = {}): Plant[] {
+  const terrain = data.terrain;
+  const extent = {
+    minX: terrain.east, maxX: terrain.east + (terrain.width - 1) * terrain.spacing,
+    minY: terrain.north - (terrain.height - 1) * terrain.spacing, maxY: terrain.north,
+  };
+  const { excluded, woodAt } = collectPolygons(data, extent);
+  const distanceToTrack = collectSurfaceTrack(data);
+  const accepted = (x: number, y: number) =>
+    inBounds(x, y, extent) && (options.ownsCell?.(x, -y) ?? true) && !excluded(x, y);
+  const plants: Plant[] = [];
+  const growth = (x: number, y: number, kind: PlantKind, height: number, width: number, seed: number) => ({
+    kind, east: x, north: y, height, width, rotation: hash(seed, 59, 19) * 2 * Math.PI,
+    tint: 0.65 + hash(seed, 15, 23) * 0.35,
+  });
+
+  const across = extent.maxX - extent.minX;
+  const length = extent.maxY - extent.minY;
+  const densityStep = Math.max(9.8, Math.ceil(Math.sqrt(across * length / 19500) / 4.9) * 4.9);
+  for (let j = Math.floor(extent.minY / densityStep); j * densityStep <= extent.maxY; j++) {
+    for (let i = Math.floor(extent.minX / densityStep); i * densityStep <= extent.maxX; i++) {
+      const x = (i + hash(i, j, 1)) * densityStep;
+      const y = (j + hash(i, j, 2)) * densityStep;
+      const feature = woodAt(x, y);
+      if (!feature || !accepted(x, y)) continue;
+      const morph = hash(i, j, 3);
+      const gap = Math.sin(x * 0.021 + Math.sin(y * 0.013)) * Math.cos(y * 0.017 - Math.sin(x * 0.008));
+      if (morph < Math.max(0, gap * 0.28)) continue;
+      const kind = treeKind(feature, hash(i, j, 4));
+      const height = (kind === 'spruce' ? 7.5 : kind === 'pine' ? 7 : 5.4) + Math.pow(morph, 1.4) * 12;
+      const width = height * (kind === 'spruce' ? 0.28 : kind === 'pine' ? 0.43 : 0.4);
+      if (distanceToTrack(x, y) < width * 0.52 + 4.8) continue;
+      plants.push(growth(x, y, kind, height, width, Math.floor(hash(i, j, 6) * 2 ** 30)));
+    }
+  }
+
+  const spanAt = (distance: number): TrackSpan | undefined => data.spans.find(
+    span => distance >= span.start && distance < span.end,
+  );
+  const along = new Vector3();
+  const tangent = new Vector3();
+  const shoulder = new Vector3();
+  let span: TrackSpan | undefined;
+  for (let d = 1; d < rail.length; d += 2.7) {
+    if (!span || d >= span.end) span = spanAt(d);
+    if (!span || span.tunnel || span.bridge) continue;
+    rail.position(d, along);
+    rail.position(d + 0.7, tangent);
+    tangent.sub(along);
+    shoulder.set(-tangent.z, 0, tangent.x).normalize();
+    const seed = Math.floor(d * 100) + Math.round(along.x + along.z);
+    for (const side of [-1, 1]) {
+      for (let strip = 0; strip < 3; strip++) {
+        const offset = 3.65 + strip * 4.8 + hash(seed, strip, side) * (3.8 + strip * 1.3);
+        const x = along.x + side * shoulder.x * offset;
+        const y = -along.z - side * shoulder.z * offset;
+        if (!accepted(x, y)) continue;
+        const roll = hash(seed, strip, side + 17);
+        const kind = strip === 0 || roll < 0.25 ? 'grass' : roll < 0.53 ? 'fern'
+          : roll < 0.77 ? 'fireweed' : 'willow';
+        const height = kind === 'willow' ? 0.8 + 1.4 * roll : kind === 'fireweed'
+          ? 0.58 + 0.48 * roll : 0.32 + 0.62 * roll;
+        const width = height * (kind === 'willow' ? 1.42 : kind === 'grass' ? 1.25 : 0.95);
+        if (distanceToTrack(x, y) < (kind === 'willow' ? 5.8 : 3.05) + width * 0.55) continue;
+        plants.push(growth(x, y, kind, height, width, seed + strip * 24 + side));
+      }
+      // Draw juvenile trees along the edges of the mapped forest cover.
+      if (hash(seed, side, 121) > 0.88) {
+        const offset = 15 + 9 * hash(seed, side, 188);
+        const x = along.x + side * shoulder.x * offset;
+        const y = -along.z - side * shoulder.z * offset;
+        if (woodAt(x, y) && accepted(x, y) && distanceToTrack(x, y) >= 10) {
+          const kind = hash(seed, side, 48) < 0.51 ? 'birch' : 'spruce';
+          const height = 1.6 + 3.25 * hash(seed, side, 81);
+          plants.push(growth(x, y, kind, height, height * 0.43, seed * side));
+        }
+      }
+    }
+  }
+  return plants;
+}
+
+function line(ctx: CanvasRenderingContext2D, color: string, width: number, ...points: number[]) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(points[0], points[1]);
+  for (let index = 2; index < points.length; index += 2) ctx.lineTo(points[index], points[index + 1]);
+  ctx.stroke();
+}
+
+function leaf(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, angle: number, color: string) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.ellipse(x, y, width, height, angle, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function colorFrom(palette: readonly string[], value: number) {
+  return palette[Math.min(palette.length - 1, Math.floor(value * palette.length))];
+}
+
+function spruce(ctx: CanvasRenderingContext2D, random: () => number) {
+  line(ctx, '#6d5140', 5, 196, 372, 192, 28, 190, 13);
+  const tones = ['#294335', '#334c3b', '#3f5845', '#4a644b', '#61785b', '#758660'];
+  for (let i = 0; i < 31; i++) {
+    const fraction = i / 31;
+    const y = 24 + i * 10.7;
+    const width = 9 + 161 * Math.pow(fraction, 0.85);
+    for (const side of [-1, 1]) {
+      const span = width * (0.71 + random() * 0.34);
+      const tipY = y + 12 + 18 * fraction * random();
+      const middle = 192 + side * span * 0.47;
+      line(ctx, '#3b4736', 0.9 + fraction * 2, 192, y + 3, middle, y + 9, 192 + side * span, tipY);
+      for (let needle = 0; needle < 72; needle++) {
+        const t = random();
+        const x = 192 + side * span * t;
+        const thickness = Math.sin(Math.PI * t) * (7 + 19 * fraction);
+        const base = y + (tipY - y) * t + (random() - 0.44) * thickness;
+        const tip = x + side * (3 + random() * 18) * (1 - t * 0.45);
+        const shade = colorFrom(tones, Math.min(0.999, random() * 0.72 + (base < y + 9 ? 0.23 : 0)));
+        line(ctx, shade, 0.5 + random() * 1.4, x, base, tip, base + (random() - 0.73) * (9 + 10 * fraction));
+      }
+    }
+  }
+  for (let tuft = 0; tuft < 250; tuft++) {
+    const y = 14 + random() * 345;
+    const x = 190 + (random() - 0.5) * (10 + y * 0.3);
+    line(ctx, colorFrom(tones, random()), 1.5, x, y, x + (random() - 0.5) * 12, y + 3 + random() * 6);
+  }
+}
+
+function pine(ctx: CanvasRenderingContext2D, random: () => number) {
+  const bark = ['#78624e', '#92745a', '#b18d68', '#634d3d'];
+  line(ctx, '#715242', 9, 197, 371, 190, 252, 199, 151, 182, 44);
+  for (let i = 0; i < 500; i++) {
+    const y = 47 + random() * 321;
+    const x = 190 + (random() - 0.5) * 8 + Math.sin(y / 65) * 3;
+    line(ctx, colorFrom(bark, random()), 0.5 + random() * 0.95, x, y, x + (random() - 0.5) * 3, y + random() * 8);
+  }
+  const foliage = ['#263e37', '#314d41', '#416052', '#4f6b54', '#688066', '#788867'];
+  for (let branch = 0; branch < 24; branch++) {
+    const t = branch / 24;
+    const base = 62 + t * 182;
+    const side = branch % 2 ? 1 : -1;
+    const x = 191 + side * (19 + 130 * Math.sin(Math.pow(t, 1.07) * Math.PI * 0.93) * (0.55 + random() * 0.46));
+    const y = base - 16 - random() * 28;
+    line(ctx, '#715645', 1.2 + t * 1.8, 192, base, (x + 384) / 3, base - 8, x, y);
+    const width = 19 + random() * 34;
+    for (let fascicle = 0; fascicle < 125; fascicle++) {
+      const angle = random() * Math.PI * 2;
+      const radius = Math.sqrt(random());
+      const fx = x + Math.cos(angle) * width * radius;
+      const fy = y + Math.sin(angle) * radius * (12 + width * 0.33);
+      const shade = colorFrom(foliage, Math.min(0.999, random() * 0.76 + (fy < y ? 0.20 : 0)));
+      leaf(ctx, fx, fy, 1.4 + random() * 4.9, 0.8 + random() * 2.1, (random() - 0.5) * Math.PI, shade);
+    }
+  }
+}
+
+function broadleaf(ctx: CanvasRenderingContext2D, random: () => number, willow: boolean) {
+  const branchColor = willow ? '#6e5e48' : '#d8d3b8';
+  const palette = willow
+    ? ['#40543c', '#536b50', '#62795b', '#798964', '#8b9b71']
+    : ['#466035', '#5b733b', '#708747', '#819956', '#94a45d', '#a3ae64'];
+  line(ctx, branchColor, willow ? 5 : 8, 187, 373, 192, 258, 190, 212, 206, 142, 184, 48);
+  for (let i = 0; i < 46; i++) {
+    const y = 84 + random() * 282;
+    const x = (y > 238 ? 190 : 196) + (random() - 0.5) * 4;
+    line(ctx, willow ? '#5f543f' : '#483f34', 1.2 + random() * 1.5, x - 3, y, x + 2.7, y + random() * 1.7);
+  }
+  for (let branch = 0; branch < 36; branch++) {
+    const t = branch / 36;
+    const startY = willow ? 155 + t * 184 : 57 + t * 235;
+    const theta = Math.sin(t * Math.PI * 0.96);
+    const side = branch % 2 ? 1 : -1;
+    const x = 193 + side * (13 + theta * (56 + random() * 81));
+    const y = startY - 15 - random() * (30 + theta * 23);
+    const elbow = (x + 386) / 3;
+    line(ctx, branchColor, 1.2 + theta * 1.4, 192, startY, elbow, startY - 10, x, y);
+    for (let twig = 0; twig < 5; twig++) {
+      const u = random();
+      const fx = elbow + (x - elbow) * u;
+      const fy = startY - 10 + (y - startY + 10) * u;
+      const direction = (twig % 2 ? 1 : -1) * side;
+      const ex = fx + direction * (9 + random() * 28);
+      const ey = fy - 3 - random() * 25;
+      line(ctx, '#807950', 0.6, fx, fy, ex, ey);
+      for (let i = 0; i < 32; i++) {
+        const z = random();
+        const px = fx + (ex - fx) * z + (random() - 0.5) * (22 + 12 * theta);
+        const py = fy + (ey - fy) * z + (random() - 0.5) * (24 + 16 * theta);
+        leaf(ctx, px, py, 1 + 2.6 * random(), 1.8 + random() * 3.8,
+          random() * Math.PI, colorFrom(palette, random()));
+      }
+    }
+  }
+}
+
+function verge(ctx: CanvasRenderingContext2D, random: () => number, kind: PlantKind) {
+  const tones = ['#4e6232', '#647441', '#788751', '#8a9958', '#a4a765', '#a3a07a'];
+  const count = kind === 'grass' ? 61 : kind === 'fern' ? 10 : 12;
+  for (let blade = 0; blade < count; blade++) {
+    const x = 191 + (random() - 0.5) * 97;
+    const y = 357 - random() * 16;
+    const u = (blade % 2 ? 1 : -1) * Math.pow(random(), 0.9);
+    const endX = 192 + u * (kind === 'fireweed' ? 80 : 163);
+    const endY = 32 + random() * (kind === 'fern' ? 182 : 212);
+    const bendX = x * 0.52 + endX * 0.48 - u * 33;
+    const bendY = (endY + y * 3) / 4;
+    const color = colorFrom(tones, random());
+    line(ctx, color, 1 + random() * 2.4, x, y, bendX, bendY, endX, endY);
+    if (kind === 'grass') {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(x - 1, y);
+      ctx.quadraticCurveTo(bendX - 5, bendY - 9, endX + u * 11, endY);
+      ctx.quadraticCurveTo(bendX + 7, bendY - 16, x + 1.5, y);
+      ctx.fill();
+      if (blade % 5 === 0) {
+        for (let bud = 0; bud < 11; bud++) leaf(ctx, endX - u * bud * 1.5, endY + bud * 3, 2.1, 3.6, u * 0.88, '#b2ab78');
+      }
+      continue;
+    }
+    for (let sprig = 2; sprig <= 13; sprig++) {
+      const t = sprig / 16;
+      const px = bendX + (endX - bendX) * t;
+      const py = bendY + (endY - bendY) * t;
+      const spread = Math.sin(Math.PI * t) * (kind === 'fern' ? 39 : 24);
+      for (const side of [-1, 1]) {
+        const ny = py - 12 * (1 - t);
+        line(ctx, color, 1.8, px, py, px + side * spread, ny);
+        for (let segment = 1; segment < 8; segment++) {
+          const v = segment / 8;
+          leaf(ctx, px + v * spread * side, py + (ny - py) * v,
+            (1 - v) * (kind === 'fern' ? 7 : 12) + 1, 1.2 + (1 - v) * 3, side * -0.6,
+            colorFrom(tones, random() * 0.67 + 0.12));
+        }
+      }
+    }
+    if (kind === 'fireweed') {
+      const blooms = ['#a65977', '#ca789b', '#d998b0', '#a44668'];
+      for (let flower = 0; flower < 21; flower++) {
+        const value = random();
+        const fx = endX - u * value * 14 + (random() - 0.5) * (7 + value * 19);
+        const fy = endY + value * 47;
+        leaf(ctx, fx, fy, 2.2 + value * 3.8, 2.6 + value * 1.6, value * 90, colorFrom(blooms, random()));
+      }
+    }
+  }
+}
+
+function treeCutout(context: CanvasRenderingContext2D, image: TreeImage, fractionStart: number, fractionEnd: number) {
+  const crop = document.createElement('canvas');
+  crop.width = crop.height = 384;
+  const source = crop.getContext('2d', { willReadFrequently: true });
+  if (!source) return false;
+  const left = image.width * fractionStart;
+  const span = image.width * fractionEnd - left;
+  source.drawImage(image, left, 0, span, image.height, 0, 0, crop.width, crop.height);
+  const alpha = source.getImageData(0, 0, crop.width, crop.height).data;
+  let minX = crop.width;
+  let maxX = 0;
+  let minY = crop.height;
+  let maxY = 0;
+  for (let y = 0; y < crop.height; y++) {
+    for (let x = 0; x < crop.width; x++) {
+      if (alpha[(y * crop.width + x) * 4 + 3] < 128) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  if (minX >= maxX || minY >= maxY) return false;
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  context.drawImage(crop, minX, minY, width, height, 15, 12, cellWidth - 30, cellWidth - 20);
+  return true;
+}
+
+function canopyFromAbove(context: CanvasRenderingContext2D) {
+  const random = sequence(854);
+  const tones = ['#334735', '#41583f', '#4e6547', '#637751', '#788863'];
+  for (let bough = 0; bough < 39; bough++) {
+    const angle = bough * 2.39996;
+    const radius = Math.sqrt((bough + 1) / 39) * (127 + 19 * random());
+    const bx = 192 + Math.cos(angle) * radius;
+    const by = 192 + Math.sin(angle) * radius;
+    const bend = 22 + 30 * random() * (1 - radius / 190);
+    for (let needle = 0; needle < 265; needle++) {
+      const t = random() * Math.PI * 2;
+      const reach = Math.sqrt(random());
+      const x = bx + Math.cos(t) * bend * reach;
+      const y = by + Math.sin(t) * bend * reach * (0.77 + 0.28 * random());
+      const value = Math.min(0.999, random() * 0.8 + 0.18 * Math.cos(t + Math.PI * 0.4) ** 2);
+      leaf(context, x, y, 0.7 + random() * 4, 1.2 + random() * 4.1, t, colorFrom(tones, value));
+    }
+  }
+}
+
+function buildAtlas(options: VegetationOptions) {
+  const canvas = document.createElement('canvas');
+  canvas.width = atlasWidth;
+  canvas.height = atlasHeight;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Canvas 2D is required to build vegetation materials');
+  context.lineCap = 'round';
+  cells.forEach((kind, index) => {
+    const x = index % 4 * cellWidth;
+    const y = Math.floor(index / 4) * cellWidth;
+    const random = sequence(577 + index * 23);
+    context.save();
+    context.translate(x, y);
+    context.beginPath();
+    context.rect(6, 6, cellWidth - 12, cellWidth - 12);
+    context.clip();
+    if (kind === 'spruce') {
+      if (!options.spruceImage || !treeCutout(context, options.spruceImage, 0, 1)) spruce(context, random);
+    } else if (kind === 'pine') {
+      if (!options.pineAndBirchImage || !treeCutout(context, options.pineAndBirchImage, 0, 0.5)) pine(context, random);
+    } else if (kind === 'birch') {
+      if (!options.pineAndBirchImage || !treeCutout(context, options.pineAndBirchImage, 0.5, 1)) broadleaf(context, random, false);
+    } else if (kind === 'willow') broadleaf(context, random, true);
+    else verge(context, random, kind);
+    context.restore();
+  });
+  context.save();
+  context.translate(cellWidth * 3, cellWidth);
+  canopyFromAbove(context);
+  context.restore();
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
+
+function cardGeometry(layout: 'detailed' | 'distant' | 'understory') {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  const crowns: number[] = [];
+  const indices: number[] = [];
+  const add = (corners: number[], normal: Vector3, crown = 0) => {
+    const index = positions.length / 3;
+    positions.push(...corners);
+    uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
+    for (let vertex = 0; vertex < 4; vertex++) {
+      normals.push(normal.x, normal.y, normal.z);
+      crowns.push(crown);
+    }
+    indices.push(index, index + 1, index + 2, index, index + 2, index + 3);
+  };
+  const sides = layout === 'detailed' ? 4 : layout === 'distant' ? 2 : 3;
+  for (let side = 0; side < sides; side++) {
+    const angle = side * Math.PI / sides;
+    const x = Math.cos(angle) / 2;
+    const z = Math.sin(angle) / 2;
+    add([-x, 0, -z, x, 0, z, x, 1, z, -x, 1, -z], new Vector3(-z, 0.36, x).normalize());
+  }
+  if (layout !== 'understory') {
+    add([-0.48, 0.68, -0.49, 0.48, 0.75, -0.49, 0.48, 0.83, 0.49, -0.48, 0.76, 0.49],
+      new Vector3(0, 1, 0), 1);
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new Float32BufferAttribute(normals, 3));
+  geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute('plantCrown', new Float32BufferAttribute(crowns, 1));
+  geometry.setIndex(indices);
+  return geometry;
+}
+
+type PlantUniforms = {
+  time: { value: number };
+  breeze: { value: number };
+  powder: { value: number };
+  wet: { value: number };
+};
+
+function plantShader(material: Material, uniforms: PlantUniforms, shaded: boolean) {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.plantTime = uniforms.time;
+    shader.uniforms.plantBreeze = uniforms.breeze;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+attribute vec3 plantAtlas;
+attribute float plantCrown;
+uniform float plantTime;
+uniform float plantBreeze;
+varying float vPlantTip;
+varying float vPlantOpacity;`)
+      .replace('#include <uv_vertex>', `#include <uv_vertex>
+#ifdef USE_MAP
+vec2 tile = mix(plantAtlas.xy, vec2(0.75, 0.0), plantCrown);
+vMapUv = tile + vec2(mix(0.009, 0.991, vMapUv.x) * 0.25,
+                    mix(0.009, 0.991, vMapUv.y) * 0.5);
+#endif`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+float sway = sin(plantTime * 1.34 + plantAtlas.z) * 0.62
+  + sin(plantTime * 2.28 + plantAtlas.z * 0.49) * 0.33;
+float tip = position.y * position.y;
+transformed.x += sway * tip * plantBreeze;
+transformed.z += sin(plantTime * 1.07 + plantAtlas.z * 0.84) * tip * plantBreeze * 0.46;
+vec4 root = vec4(0.0, 0.0, 0.0, 1.0);
+#ifdef USE_INSTANCING
+root = instanceMatrix * root;
+#endif
+float rootHeight = (modelMatrix * root).y;
+vPlantOpacity = mix(1.0, smoothstep(15.0, 70.0, cameraPosition.y - rootHeight), plantCrown);
+vPlantTip = position.y;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vPlantOpacity;')
+      .replace('#include <alphatest_fragment>', 'diffuseColor.a *= vPlantOpacity;\n#include <alphatest_fragment>');
+    if (!shaded) return;
+    shader.uniforms.plantPowder = uniforms.powder;
+    shader.uniforms.plantWet = uniforms.wet;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+uniform float plantPowder;
+uniform float plantWet;
+varying float vPlantTip;`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+float inLeaf = smoothstep(0.16, 0.58, vPlantTip);
+float leafTone = max(diffuseColor.g, diffuseColor.r);
+float frost = plantPowder * (0.22 + inLeaf * 0.58)
+  * smoothstep(0.05, 0.21, leafTone);
+diffuseColor.rgb *= mix(vec3(1.0), vec3(0.74, 0.81, 0.83), plantWet);
+diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.68, 0.73, 0.76), frost);`);
+  };
+  material.customProgramCacheKey = () => shaded ? 'rooted-vegetation-light' : 'rooted-vegetation-shadow';
+}
+
+type PlantBatch = { detailed?: InstancedMesh; simpler: InstancedMesh; cover: boolean };
+
+function buildBatch(plants: Plant[], base: BufferGeometry, detailedBase: BufferGeometry | null,
+  material: Material, depth: Material, heightAt: (x: number, z: number) => number, cover: boolean): PlantBatch {
+  const atlas = new Float32Array(plants.length * 3);
+  const geometry = base.clone();
+  const detailedGeometry = detailedBase?.clone();
+  const atlasAttribute = new InstancedBufferAttribute(atlas, 3);
+  geometry.setAttribute('plantAtlas', atlasAttribute);
+  detailedGeometry?.setAttribute('plantAtlas', atlasAttribute);
+  const simpler = new InstancedMesh(geometry, material, plants.length);
+  const detailed = detailedGeometry ? new InstancedMesh(detailedGeometry, material, plants.length) : undefined;
+  const dummy = new Object3D();
+  const color = new Color();
+  plants.forEach((plant, index) => {
+    const tile = cells.indexOf(plant.kind);
+    atlas[index * 3] = tile % 4 / 4;
+    atlas[index * 3 + 1] = tile < 4 ? 0.5 : 0;
+    atlas[index * 3 + 2] = plant.rotation * 2.35;
+    dummy.position.set(plant.east, heightAt(plant.east, -plant.north) - 0.085, -plant.north);
+    dummy.rotation.y = plant.rotation;
+    dummy.scale.set(plant.width, plant.height, plant.width);
+    dummy.updateMatrix();
+    simpler.setMatrixAt(index, dummy.matrix);
+    color.setRGB(plant.tint, 0.80 + plant.tint * 0.20, 0.83 + plant.tint * 0.17);
+    simpler.setColorAt(index, color);
+  });
+  simpler.name = cover ? 'Railway understory' : 'Mapped woodland canopy';
+  simpler.computeBoundingSphere();
+  if (simpler.boundingSphere) simpler.boundingSphere.radius += 1.5;
+  if (detailed) {
+    detailed.name = 'Woodland crown detail';
+    detailed.instanceMatrix = simpler.instanceMatrix;
+    detailed.instanceColor = simpler.instanceColor;
+    detailed.computeBoundingSphere();
+    if (detailed.boundingSphere) detailed.boundingSphere.radius += 1.5;
+    detailed.customDepthMaterial = depth;
+    detailed.castShadow = true;
+    detailed.receiveShadow = true;
+    detailed.visible = false;
+  }
+  return { cover, simpler, detailed };
+}
+
+interface SharedVegetationMaterials {
+  atlas: Texture;
+  material: MeshLambertMaterial;
+  depth: MeshDepthMaterial;
+  uniforms: PlantUniforms;
+  users: number;
+}
+
+let shared: SharedVegetationMaterials | undefined;
+
+function vegetationMaterials(options: VegetationOptions): SharedVegetationMaterials {
+  if (shared) {
+    shared.users += 1;
+    return shared;
+  }
+  const atlas = buildAtlas(options);
+  const material = new MeshLambertMaterial({ map: atlas, alphaTest: 0.43, side: DoubleSide });
+  const depth = new MeshDepthMaterial({ map: atlas, alphaTest: 0.43, side: DoubleSide, depthPacking: RGBADepthPacking });
+  const uniforms: PlantUniforms = {
+    time: { value: 0 }, breeze: { value: 0.025 }, powder: { value: 0 }, wet: { value: 0 },
+  };
+  plantShader(material, uniforms, true);
+  plantShader(depth, uniforms, false);
+  shared = { atlas, material, depth, uniforms, users: 1 };
+  return shared;
+}
+
+export function createVegetation(data: WorldData, rail: Rail, options: VegetationOptions = {}) {
+  const plants = placeVegetation(data, rail, options);
+  const group = new Group();
+  group.name = 'Norwegian woodland and railway understory';
+  const heightAt = options.heightAt ?? ((east, z) => groundHeight(data.terrain, east, -z));
+  const buckets = new Map<string, { plants: Plant[]; cover: boolean }>();
+  for (const plant of plants) {
+    const cover = !forest.includes(plant.kind);
+    const size = cover ? 190 : 550;
+    const key = `${size}:${Math.floor(plant.east / size)}:${Math.floor(plant.north / size)}`;
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = { plants: [], cover };
+      buckets.set(key, bucket);
+    }
+    bucket.plants.push(plant);
+  }
+
+  const resources = vegetationMaterials(options);
+  const distant = cardGeometry('distant');
+  const detailed = cardGeometry('detailed');
+  const understory = cardGeometry('understory');
+  const batches = [...buckets.values()].map(bucket => {
+    const batch = buildBatch(bucket.plants, bucket.cover ? understory : distant, bucket.cover ? null : detailed,
+      resources.material, resources.depth, heightAt, bucket.cover);
+    group.add(batch.simpler);
+    if (batch.detailed) group.add(batch.detailed);
+    return batch;
+  });
+  distant.dispose();
+  detailed.dispose();
+  understory.dispose();
+
+  let elapsed = resources.uniforms.time.value;
+  let disposed = false;
+  return {
+    group,
+    update(camera: Vector3, seconds: number, weather: VegetationWeather) {
+      elapsed += seconds;
+      resources.uniforms.time.value = elapsed;
+      resources.uniforms.breeze.value = weather === 'rain' ? 0.08 : weather === 'snow' ? 0.053 : 0.031;
+      resources.uniforms.powder.value = weather === 'snow' ? 1 : 0;
+      resources.uniforms.wet.value = weather === 'rain' ? 1 : 0;
+      for (const batch of batches) {
+        const sphere = batch.simpler.boundingSphere;
+        if (!sphere) continue;
+        const distance = Math.max(0, camera.distanceTo(sphere.center) - sphere.radius * 0.67);
+        const useDetail = !batch.cover && distance < 245;
+        batch.simpler.visible = !useDetail && distance < (batch.cover ? 170 : 5600);
+        if (batch.detailed) batch.detailed.visible = useDetail;
+      }
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const batch of batches) {
+        batch.simpler.dispose();
+        batch.simpler.geometry.dispose();
+        batch.detailed?.dispose();
+        batch.detailed?.geometry.dispose();
+      }
+      if (--resources.users !== 0) return;
+      resources.material.dispose();
+      resources.depth.dispose();
+      resources.atlas.dispose();
+      shared = undefined;
+    },
+  };
+}

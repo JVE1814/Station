@@ -124,3 +124,8 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - Matched all four calls on the selected Entur R40 journey for 18 November 2026, departing Evanger at 08:01 and arriving at Voss at 08:18. The dated timetable contains 36 district journeys in both directions.
 - Verified a maximum OSM plan error of 0.0296 m on the rendered rail spline and under 0.0001 m at the four station markers. Every source call and tile seam passed. The clearance audit checked 6,699 trackbed samples, with a maximum gap of 0.316 m and zero missing, plus 131,535 coach probes with no intersections.
 - The full data build now regenerates the separate Evanger–Voss data and catalog entry. The earlier Seimsgrend–Bulken checkpoint and the intercity assets keep their existing data paths.
+
+## Evanger–Voss woodland rendering
+
+- Added OSM-bounded woodland with spruce, Scots pine and birch, plus procedural willow, grass, fern and fireweed along suitable rail shoulders. The placement excludes mapped water, buildings, platforms and the running-track corridor. Added an original generated cutout atlas for pine and birch.
+- TypeScript, targeted lint and three placement and LOD tests passed. An isolated Chromium scene rendered clear, snowy and elevated views with zero console errors. The integrated lakeside chase composition and its frame timing are under review.

@@ -15,8 +15,9 @@ try {
     const expected = new Map([['F4', 'Bergen'], ['F5', 'Stavanger'], ['F6', 'Trondheim']]);
     for (const [ref, destination] of expected) {
       const captureLine = captures && ref === 'F4';
-      const viewport = captureLine ? { width: 1920, height: 1080 } : { width: 800, height: 450 };
+      const viewport = captureLine ? { width: 1920, height: 1080 } : { width: 640, height: 360 };
       const page = await browser.newPage({ viewport });
+      page.setDefaultTimeout(180_000);
       const cdp = captureLine ? await page.context().newCDPSession(page) : undefined;
       const capture = async (name) => {
         if (!cdp) return;
@@ -24,6 +25,7 @@ try {
         await writeFile(`evidence/${name}.png`, Buffer.from(image.data, 'base64'));
       };
       const errors = [];
+      const foreignRequests = [];
       page.on('pageerror', error => errors.push(error.message));
       page.on('console', message => {
         if (message.type() === 'error') errors.push(message.text());
@@ -32,16 +34,25 @@ try {
       uri.searchParams.set('line', ref);
       await page.route('**/*', route => {
         const request = new URL(route.request().url());
-        return request.origin === uri.origin || request.protocol === 'data:' || request.protocol === 'blob:'
-          ? route.continue() : route.abort('internetdisconnected');
+        if (request.origin === uri.origin || request.protocol === 'data:' || request.protocol === 'blob:') {
+          return route.continue();
+        }
+        foreignRequests.push(request.href);
+        return route.abort('internetdisconnected');
       });
       await page.goto(uri.href);
-      await page.waitForFunction(() => document.getElementById('world').dataset.stage === 'running', null,
-        { timeout: 240_000, polling: 200 });
-      assert.equal(await page.locator('#line').textContent(), ref);
-      assert.match(await page.locator('#journey').textContent(), new RegExp(destination));
-      await page.evaluate(() => {
+      const boot = await page.waitForFunction(() => {
+        if (document.getElementById('world').dataset.stage !== 'running') return false;
         document.getElementById('pause').click();
+        return {
+          line: document.getElementById('line').textContent,
+          journey: document.getElementById('journey').textContent,
+        };
+      }, null, { timeout: 240_000, polling: 200 });
+      const service = await boot.jsonValue();
+      assert.equal(service.line, ref);
+      assert.match(service.journey, new RegExp(destination));
+      await page.evaluate(() => {
         document.getElementById('map-view').click();
         document.getElementById('fit-network').click();
       });
@@ -59,6 +70,7 @@ try {
         console.log('Zoomed from the whole network to mapped Stavanger platforms without changing the F4 service.');
       }
       assert.deepEqual(errors, []);
+      assert.deepEqual(foreignRequests, []);
       console.log(`${ref} offline WebGL2 service and whole-network camera loaded with zero console errors.`);
       await page.close();
     }

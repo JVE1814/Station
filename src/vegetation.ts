@@ -775,6 +775,65 @@ function understoryGeometry() {
   return geometry;
 }
 
+function understoryLeafGeometry() {
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const edges: number[] = [];
+  const indices: number[] = [];
+  const vertex = (x: number, y: number, z: number, tone: number, edgeX = 0, edgeZ = 0) => {
+    positions.push(x * 0.82, y, z * 0.82);
+    edges.push(edgeX * 0.82, 0, edgeZ * 0.82);
+    colors.push(tone, tone, tone);
+  };
+  for (let stem = 0; stem < 6; stem++) {
+    const angle = stem * 2.39996 + 0.22;
+    const east = Math.cos(angle);
+    const north = Math.sin(angle);
+    const height = [0.87, 0.69, 0.94, 0.58, 0.78, 0.66][stem];
+    const reach = [0.35, 0.31, 0.26, 0.39, 0.33, 0.37][stem];
+    const crown = stem % 2 === 0 ? 0.94 : 0.79;
+    const base = positions.length / 3;
+    const rootX = east * 0.065;
+    const rootZ = north * 0.065;
+    const bendX = rootX + east * reach * 0.44;
+    const bendZ = rootZ + north * reach * 0.44;
+    for (const side of [-1, 1]) {
+      const edgeX = -north * side * 0.022;
+      const edgeZ = east * side * 0.022;
+      vertex(rootX + edgeX, 0, rootZ + edgeZ, 0.68, edgeX, edgeZ);
+    }
+    for (const side of [-1, 1]) {
+      const edgeX = -north * side * 0.039;
+      const edgeZ = east * side * 0.039;
+      vertex(bendX + edgeX, height * 0.66, bendZ + edgeZ, crown, edgeX, edgeZ);
+    }
+    vertex(rootX + east * reach, height * 0.91, rootZ + north * reach, 1.06);
+    indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2, base + 2, base + 3, base + 4);
+    for (const side of [-1, 1]) {
+      const startX = bendX - north * side * 0.015;
+      const startZ = bendZ + east * side * 0.015;
+      const wingX = -north * side * 0.115 + east * 0.055;
+      const wingZ = east * side * 0.115 + north * 0.055;
+      const leaf = positions.length / 3;
+      vertex(startX - east * 0.016, height * 0.58, startZ - north * 0.016, 0.71);
+      vertex(startX + wingX * 0.55 - east * 0.034, height * 0.75, startZ + wingZ * 0.55 - north * 0.034,
+        crown, -east * 0.034, -north * 0.034);
+      vertex(startX + wingX, height * (0.73 + side * 0.045), startZ + wingZ, 1.05);
+      vertex(startX + wingX * 0.57 + east * 0.045, height * 0.66, startZ + wingZ * 0.57 + north * 0.045,
+        0.85, east * 0.045, north * 0.045);
+      indices.push(leaf, leaf + 1, leaf + 3, leaf + 1, leaf + 2, leaf + 3);
+    }
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
+  geometry.setAttribute('plantLeafEdge', new Float32BufferAttribute(edges, 3));
+  geometry.setAttribute('plantCrown', new Float32BufferAttribute(new Float32Array(positions.length / 3), 1));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 type PlantUniforms = {
   time: { value: number };
   breeze: { value: number };
@@ -782,7 +841,7 @@ type PlantUniforms = {
   wet: { value: number };
 };
 
-function plantShader(material: Material, uniforms: PlantUniforms, shaded: boolean) {
+function plantShader(material: Material, uniforms: PlantUniforms, shaded: boolean, leaves = false) {
   material.onBeforeCompile = (shader) => {
     shader.uniforms.plantTime = uniforms.time;
     shader.uniforms.plantBreeze = uniforms.breeze;
@@ -790,6 +849,7 @@ function plantShader(material: Material, uniforms: PlantUniforms, shaded: boolea
       .replace('#include <common>', `#include <common>
 attribute vec4 plantAtlas;
 attribute float plantCrown;
+${leaves ? 'attribute vec3 plantLeafEdge;\nvarying float vPlantSpecies;' : ''}
 uniform float plantTime;
 uniform float plantBreeze;
 varying float vPlantTip;
@@ -805,6 +865,10 @@ vMapUv = tile + vec2(mix(0.009, 0.991, vMapUv.x) * 0.25,
 float sway = sin(plantTime * 1.34 + plantAtlas.z) * 0.62
   + sin(plantTime * 2.28 + plantAtlas.z * 0.49) * 0.33;
 float tip = position.y * position.y;
+${leaves ? `
+vPlantSpecies = floor(plantAtlas.x * 4.0 + 0.5) + (plantAtlas.y < 0.25 ? 4.0 : 0.0);
+transformed -= plantLeafEdge * (vPlantSpecies == 4.0 ? 0.69 : 0.0);
+` : ''}
 transformed.x += sway * tip * plantBreeze;
 transformed.z += sin(plantTime * 1.07 + plantAtlas.z * 0.84) * tip * plantBreeze * 0.46;
 vec4 root = vec4(0.0, 0.0, 0.0, 1.0);
@@ -827,9 +891,16 @@ vBirchAutumn = plantAtlas.w;`);
 uniform float plantPowder;
 uniform float plantWet;
 varying float vPlantTip;
-varying float vBirchAutumn;`)
+varying float vBirchAutumn;
+${leaves ? 'varying float vPlantSpecies;' : ''}`)
       .replace('#include <map_fragment>', `#include <map_fragment>
 vec3 leafColor = diffuseColor.rgb;
+${leaves ? `
+leafColor = vPlantSpecies < 3.5 ? vec3(0.105, 0.169, 0.051)
+  : vPlantSpecies < 4.5 ? vec3(0.230, 0.285, 0.072)
+  : vPlantSpecies < 5.5 ? vec3(0.139, 0.214, 0.048)
+  : vec3(0.227, 0.208, 0.073);
+` : ''}
 float greenSeparation = (leafColor.g - leafColor.r) / max(leafColor.g, 0.045);
 float goldMask = smoothstep(0.020, 0.17, greenSeparation)
   * smoothstep(0.009, 0.039, leafColor.g - leafColor.b);
@@ -850,13 +921,14 @@ float frost = plantPowder * (0.22 + inLeaf * 0.58)
 diffuseColor.rgb *= mix(vec3(1.0), vec3(0.74, 0.81, 0.83), plantWet);
 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.68, 0.73, 0.76), frost);`);
   };
-  material.customProgramCacheKey = () => shaded ? 'rooted-vegetation-light' : 'rooted-vegetation-shadow';
+  material.customProgramCacheKey = () => leaves ? 'rooted-understory-leaves'
+    : shaded ? 'rooted-vegetation-light' : 'rooted-vegetation-shadow';
 }
 
 type PlantBatch = { detailed?: InstancedMesh; simpler: InstancedMesh; cover: boolean };
 
 function buildBatch(plants: Plant[], base: BufferGeometry, detailedBase: BufferGeometry | null,
-  material: Material, depth: Material, heightAt: (x: number, z: number) => number, cover: boolean): PlantBatch {
+  material: Material, detailMaterial: Material, depth: Material, heightAt: (x: number, z: number) => number, cover: boolean): PlantBatch {
   const atlas = new Float32Array(plants.length * 4);
   const geometry = base.clone();
   const detailedGeometry = detailedBase?.clone();
@@ -864,7 +936,7 @@ function buildBatch(plants: Plant[], base: BufferGeometry, detailedBase: BufferG
   geometry.setAttribute('plantAtlas', atlasAttribute);
   detailedGeometry?.setAttribute('plantAtlas', atlasAttribute);
   const simpler = new InstancedMesh(geometry, material, plants.length);
-  const detailed = detailedGeometry ? new InstancedMesh(detailedGeometry, material, plants.length) : undefined;
+  const detailed = detailedGeometry ? new InstancedMesh(detailedGeometry, detailMaterial, plants.length) : undefined;
   const dummy = new Object3D();
   const color = new Color();
   plants.forEach((plant, index) => {
@@ -886,13 +958,13 @@ function buildBatch(plants: Plant[], base: BufferGeometry, detailedBase: BufferG
   simpler.computeBoundingSphere();
   if (simpler.boundingSphere) simpler.boundingSphere.radius += 1.5;
   if (detailed) {
-    detailed.name = 'Woodland crown detail';
+    detailed.name = cover ? 'Railway understory leaf detail' : 'Woodland crown detail';
     detailed.instanceMatrix = simpler.instanceMatrix;
     detailed.instanceColor = simpler.instanceColor;
     detailed.computeBoundingSphere();
     if (detailed.boundingSphere) detailed.boundingSphere.radius += 1.5;
-    detailed.customDepthMaterial = depth;
-    detailed.castShadow = true;
+    if (!cover) detailed.customDepthMaterial = depth;
+    detailed.castShadow = !cover;
     detailed.receiveShadow = true;
     detailed.visible = false;
   }
@@ -902,6 +974,7 @@ function buildBatch(plants: Plant[], base: BufferGeometry, detailedBase: BufferG
 interface SharedVegetationMaterials {
   atlas: Texture;
   material: MeshLambertMaterial;
+  leaves: MeshLambertMaterial;
   depth: MeshDepthMaterial;
   uniforms: PlantUniforms;
   users: number;
@@ -916,13 +989,15 @@ function vegetationMaterials(options: VegetationOptions): SharedVegetationMateri
   }
   const atlas = buildAtlas(options);
   const material = new MeshLambertMaterial({ map: atlas, alphaTest: 0.43, side: DoubleSide });
+  const leaves = new MeshLambertMaterial({ side: DoubleSide, vertexColors: true });
   const depth = new MeshDepthMaterial({ map: atlas, alphaTest: 0.43, side: DoubleSide, depthPacking: RGBADepthPacking });
   const uniforms: PlantUniforms = {
     time: { value: 0 }, breeze: { value: 0.025 }, powder: { value: 0 }, wet: { value: 0 },
   };
   plantShader(material, uniforms, true);
   plantShader(depth, uniforms, false);
-  shared = { atlas, material, depth, uniforms, users: 1 };
+  plantShader(leaves, uniforms, true, true);
+  shared = { atlas, material, leaves, depth, uniforms, users: 1 };
   return shared;
 }
 
@@ -948,9 +1023,10 @@ export function createVegetation(data: WorldData, rail: Rail, options: Vegetatio
   const distant = cardGeometry('distant');
   const detailed = cardGeometry('detailed');
   const understory = understoryGeometry();
+  const leafDetail = understoryLeafGeometry();
   const batches = [...buckets.values()].map(bucket => {
-    const batch = buildBatch(bucket.plants, bucket.cover ? understory : distant, bucket.cover ? null : detailed,
-      resources.material, resources.depth, heightAt, bucket.cover);
+    const batch = buildBatch(bucket.plants, bucket.cover ? understory : distant, bucket.cover ? leafDetail : detailed,
+      resources.material, bucket.cover ? resources.leaves : resources.material, resources.depth, heightAt, bucket.cover);
     group.add(batch.simpler);
     if (batch.detailed) group.add(batch.detailed);
     return batch;
@@ -958,6 +1034,7 @@ export function createVegetation(data: WorldData, rail: Rail, options: Vegetatio
   distant.dispose();
   detailed.dispose();
   understory.dispose();
+  leafDetail.dispose();
 
   let elapsed = resources.uniforms.time.value;
   let disposed = false;
@@ -973,7 +1050,7 @@ export function createVegetation(data: WorldData, rail: Rail, options: Vegetatio
         const sphere = batch.simpler.boundingSphere;
         if (!sphere) continue;
         const distance = Math.max(0, camera.distanceTo(sphere.center) - sphere.radius * 0.67);
-        const useDetail = !batch.cover && distance < 245;
+        const useDetail = distance < (batch.cover ? 72 : 245);
         batch.simpler.visible = !useDetail && distance < (batch.cover ? 170 : 5600);
         if (batch.detailed) batch.detailed.visible = useDetail;
       }
@@ -989,6 +1066,7 @@ export function createVegetation(data: WorldData, rail: Rail, options: Vegetatio
       }
       if (--resources.users !== 0) return;
       resources.material.dispose();
+      resources.leaves.dispose();
       resources.depth.dispose();
       resources.atlas.dispose();
       shared = undefined;

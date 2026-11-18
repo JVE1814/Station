@@ -119,7 +119,26 @@ test('woodland detail is exclusive and wind updates matching shadow depth geomet
   try {
     const vegetation = createVegetation(data, new Rail(data.rail));
     try {
-      const brush = vegetation.group.getObjectByName('Railway understory').geometry;
+      const farBrush = vegetation.group.getObjectByName('Railway understory');
+      const closeBrush = vegetation.group.getObjectByName('Railway understory leaf detail');
+      assert.equal(closeBrush.material.map, null);
+      assert.equal(closeBrush.material.alphaTest, 0);
+      assert.equal(closeBrush.instanceMatrix, farBrush.instanceMatrix);
+      assert.equal(closeBrush.geometry.index.count / 3, 42);
+      const leafPoints = closeBrush.geometry.getAttribute('position');
+      assert.ok(closeBrush.geometry.getAttribute('plantLeafEdge'));
+      for (let index = 0; index < leafPoints.count; index++) {
+        const radius = Math.hypot(leafPoints.getX(index), leafPoints.getZ(index));
+        assert.ok(radius + leafPoints.getY(index) ** 2 * 0.085 <= 0.5);
+      }
+      const brushSphere = farBrush.boundingSphere;
+      vegetation.update(brushSphere.center, 0, 'clear');
+      assert.equal(closeBrush.visible, true);
+      assert.equal(farBrush.visible, false);
+      vegetation.update(brushSphere.center.clone().add(new Vector3(110 + brushSphere.radius * 0.67, 0, 0)), 0, 'clear');
+      assert.equal(closeBrush.visible, false);
+      assert.equal(farBrush.visible, true);
+      const brush = farBrush.geometry;
       const points = brush.getAttribute('position');
       assert.equal(brush.index.count / 3, 12);
       for (let index = 0; index < points.count; index++) {

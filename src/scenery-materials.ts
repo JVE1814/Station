@@ -65,20 +65,41 @@ export function civilTexture(kind: 'rock' | 'concrete'): CanvasTexture | undefin
   return result;
 }
 
-export function blendExposedRock(material: MeshStandardMaterial, rock: Texture): void {
+export function blendExposedRock(material: MeshStandardMaterial, rock: Texture, detail?: Texture): void {
   const compile = material.onBeforeCompile;
   const cache = material.customProgramCacheKey;
   material.onBeforeCompile = (shader, renderer) => {
     compile.call(material, shader, renderer);
     shader.uniforms.exposedRock = { value: rock };
+    if (detail) shader.uniforms.terrainDetail = { value: detail };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float rockExposure;\nvarying float vRockExposure;\nvarying vec3 vGround;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRockExposure = rockExposure;\nvGround = position;');
+    if (detail) shader.vertexShader = shader.vertexShader.replace('#include <uv_vertex>', `#include <uv_vertex>
+      #ifdef USE_BUMPMAP
+        vBumpMapUv *= 3.4;
+      #endif
+    `);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform sampler2D exposedRock;
         varying float vRockExposure;
         varying vec3 vGround;
+        ${detail ? `
+          uniform sampler2D terrainDetail;
+          vec3 materialPatch(vec2 sampleUv, vec2 atlasCell) {
+            vec2 uv = (atlasCell + .024 + fract(sampleUv) * .952) * .5;
+            return textureGrad(terrainDetail, uv, dFdx(sampleUv) * .476, dFdy(sampleUv) * .476).rgb;
+          }
+          vec3 terrainPattern(vec2 coordinate, vec2 atlasCell, float spread) {
+            vec2 source = coordinate * .48;
+            vec2 rotated = mat2(.63,.78,-.78,.63) * source * 1.38 + vec2(.419,.179);
+            vec2 edge = min(fract(source), 1.0 - fract(source));
+            float boundary = 1.0 - smoothstep(.02,.17,min(edge.x, edge.y));
+            return mix(materialPatch(source, atlasCell), materialPatch(rotated, atlasCell),
+              max(boundary, .14 + spread * .60));
+          }
+        ` : ''}
         float groundGrain(vec2 p) {
           vec3 q = fract(vec3(p.xyx) * .1031);
           q += dot(q, q.yzx + 33.33);
@@ -111,10 +132,31 @@ export function blendExposedRock(material: MeshStandardMaterial, rock: Texture):
           + texture2D(exposedRock, vGround.xy * .55).rgb * weights.z;
         float stone = smoothstep(.41, .88, vRockExposure * .72 + mottling * .40);
         vec3 groundColor = mix(turf, strata * (.73 + .36 * broad), stone);
+        ${detail ? `
+          float forestLitter = 1.0 - smoothstep(.17, .33, vColor.r);
+          float heathCover = smoothstep(.48, .76, .45 * mottling + .55 * broad) * (1.0 - forestLitter);
+          vec3 groundGrass = terrainPattern(terrain, vec2(0,1), mottling);
+          vec3 groundHeath = terrainPattern(terrain, vec2(1,1), broad);
+          vec3 forestBed = terrainPattern(terrain, vec2(0,0), mottling);
+          vec3 stoneDetail = terrainPattern(vGround.zy, vec2(1,0), mottling) * weights.x
+            + terrainPattern(vGround.xz, vec2(1,0), mottling) * weights.y
+            + terrainPattern(vGround.xy, vec2(1,0), mottling) * weights.z;
+          vec3 pasture = mix(mix(groundGrass, groundHeath, heathCover), forestBed, forestLitter);
+          vec3 closeDetail = mix(pasture, stoneDetail, stone) * (1.49 + .25 * broad);
+          groundColor = mix(closeDetail, groundColor, smoothstep(115.0, 760.0, length(vViewPosition)));
+        ` : ''}
         float dust = smoothstep(710.0, 1010.0, vGround.y + 90.0 * (broad - .5))
           * smoothstep(.2, .78, mottling) * smoothstep(.24, .82, weights.y);
         diffuseColor.rgb *= mix(groundColor, vec3(.75, .82, .89), dust * .86);
       `);
+    if (detail) shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_maps>', `
+      #include <normal_fragment_maps>
+      #ifdef USE_BUMPMAP
+        float heightDetail = dot(closeDetail, vec3(.32,.51,.17));
+        vec2 slopeDetail = vec2(dFdx(heightDetail), dFdy(heightDetail)) * (.034 + .047 * stone);
+        normal = perturbNormalArb(-vViewPosition, normal, slopeDetail, faceDirection);
+      #endif
+    `);
   };
-  material.customProgramCacheKey = () => `${cache.call(material)}:exposed-rock`;
+  material.customProgramCacheKey = () => `${cache.call(material)}:exposed-rock:${Boolean(detail)}`;
 }

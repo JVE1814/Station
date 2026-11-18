@@ -35,6 +35,7 @@ export class Cameras {
   private initialized = false;
   private grounded = false;
   private lookLift = 0;
+  private mapLean = .22;
   private transition = 0;
   private readonly movingCamera: boolean;
 
@@ -70,12 +71,13 @@ export class Cameras {
     this.transition = 0.72;
   }
 
-  cut(lift = 0): void {
+  cut(lift = 0, mapLean = .22): void {
     this.initialized = false;
     this.transition = 0;
     this.mapGround = undefined;
     this.grounded = true;
     this.lookLift = lift;
+    this.mapLean = mapLean;
   }
 
   allowMapExtent(height: number): void {
@@ -154,7 +156,7 @@ export class Cameras {
       this.target.y = this.mapGround;
       this.destination.copy(this.target);
       this.destination.y += this.mapOffset.y;
-      this.destination.z += this.mapOffset.y * 0.22;
+      this.destination.z += this.mapOffset.y * this.mapLean;
     }
     if (this.view !== 'cab') {
       this.target.y += this.lookLift;

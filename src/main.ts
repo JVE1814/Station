@@ -22,7 +22,7 @@ import type { Station, WorldData } from './world-data';
 import { frameHero, heroShots } from './hero';
 import { parseQuality, ShowpieceLight } from './showpiece-light';
 import { ShowpiecePanel, StoppingMarker } from './showpiece-ui';
-import { DrivingTutorial } from './driving';
+import { DrivingTutorial, STOPPED_SPEED } from './driving';
 import { createLakesideProfile, StationAudio } from './audio';
 import { WaterReflection } from './water-reflection';
 import './style.css';
@@ -44,6 +44,7 @@ async function run(): Promise<void> {
   const rail = new Rail(data.rail);
   const shot = network?.ref === 'R40' && options.has('hero') ? heroShots(network).find(item => item.id === options.get('hero')) : undefined;
   const showpiece = network?.ref === 'R40';
+  if (showpiece) element('notice').textContent = 'Loading Evanger–Voss scenery…';
   const start = shot ? { distance: shot.distance, speed: shot.speed, nextIndex: Math.max(1, data.stations.findIndex(station => station.stopDistance > shot.distance)) } : undefined;
   let service = new Service(data, rail, { ...start, driving: showpiece });
   let traffic = network?.traffic?.length ? new Traffic(data, rail, service, network.traffic) : null;
@@ -79,9 +80,11 @@ async function run(): Promise<void> {
   const [grass, ballast, spruce, siding, roofing, dashboard, steel] = await Promise.all([
     'grass', 'ballast', 'spruce', 'siding', 'roofing', 'dashboard', 'steel',
   ].map(loadMap));
-  const pineAndBirch = showpiece ? await loadMap('norway-trees') : undefined;
+  const [pineAndBirch, terrainDetail] = showpiece ? await Promise.all([
+    loadMap('norway-trees'), loadMap('r40-ground'),
+  ]) : [];
   const waterReflection = showpiece ? new WaterReflection() : undefined;
-  const maps = { grass, ballast, spruce, siding, roofing, pineAndBirch, waterReflection, polished: showpiece };
+  const maps = { grass, ballast, spruce, siding, roofing, pineAndBirch, terrainDetail, waterReflection, polished: showpiece };
   let dirty = true;
   const sceneryChanged = () => { dirty = true; };
   const sceneryError = (error: unknown) => {
@@ -299,7 +302,7 @@ async function run(): Promise<void> {
     lighting?.set(night, weather);
     service.surface = weather;
     scene.environment = night ? nightReflection : dayReflection;
-    scene.environmentIntensity = showpiece ? (night ? .47 : .73) : (night ? .38 : .55);
+    scene.environmentIntensity = showpiece ? (night ? .59 : .73) : (night ? .38 : .55);
     scenery.setWeather(weather);
     scenery.setNight(night);
     element('day').textContent = night ? (showpiece ? 'Blue hour' : 'Night') : (showpiece ? 'Golden hour' : 'Day');
@@ -354,7 +357,7 @@ async function run(): Promise<void> {
     },
     day: () => { night = !night; configureWeather(); },
     weather: () => { weather = weather === 'clear' ? 'rain' : weather === 'rain' ? 'snow' : 'clear'; configureWeather(); },
-    compression: () => { timeScale = timeScale === 1 ? 2 : timeScale === 2 ? 5 : 1; element('compression').textContent = `${timeScale}×`; },
+    compression: () => { timeScale = timeScale === 1 ? 2 : timeScale === 2 ? 5 : 1; element('compression-value').textContent = `${timeScale}×`; },
     pause: () => {
       paused = !paused;
       dirty = true;
@@ -368,7 +371,8 @@ async function run(): Promise<void> {
     'less-brake': () => drive('brake', -0.2),
     doors: () => {
       if (!service.toggleDoors()) showNotice(service.boardingRemaining > 0 ? 'Boarding is still in progress.'
-        : showpiece ? 'Stop at the platform marker before opening the doors.' : 'Stop the train before opening the doors.');
+        : showpiece && service.state.speed <= STOPPED_SPEED ? 'Stop at the platform marker before opening the doors.'
+          : 'Stop the train before opening the doors.');
     },
     horn: () => audio.horn(),
     tutorial: () => restart(true),
@@ -387,7 +391,7 @@ async function run(): Promise<void> {
   const keys: Record<string, string> = {
     '1': 'cab-view', '2': 'chase-view', '3': 'map-view',
     w: 'more-power', s: 'less-power', e: 'more-brake', q: 'less-brake',
-    d: 'doors', h: 'horn', a: 'auto', t: 'compression', p: 'pause', r: 'retry', l: 'tutorial',
+    d: 'doors', h: 'horn', a: 'auto', t: 'compression', p: 'pause', r: 'retry', l: 'tutorial', escape: 'hide-result',
   };
   for (const [id, action] of Object.entries(actions)) {
     element(id).addEventListener('click', () => { audio.unlock(); dirty = true; action(); });
@@ -450,7 +454,9 @@ async function run(): Promise<void> {
     const { state } = service;
     const station = service.nextStop;
     const remaining = station ? station.stopDistance - chainage : 0;
-    speed.textContent = String(Math.round(state.speed * 3.6));
+    const speedKmh = state.speed * 3.6;
+    speed.textContent = showpiece && state.speed > STOPPED_SPEED && speedKmh < 2
+      ? Math.max(.1, speedKmh).toFixed(1) : String(Math.round(speedKmh));
     limit.textContent = String(service.trackSpan.speedLimit ?? '—');
     limit.dataset.speeding = String(service.speeding);
     const authority = service.authority;
@@ -472,7 +478,10 @@ async function run(): Promise<void> {
     signal.dataset.aspect = authority.aspect;
     const arrivalPlan = data.timetable?.calls?.[service.nextIndex]?.arrival ?? data.timetable?.arrival;
     const planned = arrivalPlan && station ? ` · ${arrivalPlan.slice(0, 5)}` : '';
-    nextStop.textContent = station ? `${station.name} · ${Math.max(0, Math.round(remaining))} m${planned}` : 'Service complete';
+    const position = showpiece && remaining < -1 ? `${Math.round(-remaining)} m past marker`
+      : `${Math.max(0, Math.round(remaining))} m`;
+    nextStop.textContent = tutorial ? 'Practice at Evanger'
+      : station ? `${station.name} · ${position}${planned}` : 'Service complete';
     const seconds = Math.floor(state.elapsed) + departure;
     clock.textContent = new Date(seconds * 1000).toISOString().slice(11, 19);
     throttle.value = service.controls.throttle;
@@ -609,6 +618,7 @@ async function run(): Promise<void> {
     if (now >= nextStatus || paused) {
       world.dataset.stage = 'running';
       if (cameras.settled) world.dataset.view = cameras.view;
+      if (shot) world.dataset.captureFrame = String(now);
       world.dataset.drawCalls = String(renderer.info.render.calls);
       world.dataset.triangles = String(renderer.info.render.triangles);
       world.dataset.chainage = chainage.toFixed(2);

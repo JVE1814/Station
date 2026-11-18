@@ -29,21 +29,18 @@ const gradeFragment = /* glsl */`
 varying vec2 vUv;
 uniform sampler2D image;
 uniform sampler2D depth;
+uniform sampler2D bloomImage;
 uniform vec2 pixel;
 uniform vec2 clipPlanes;
 uniform float occlusion;
 uniform float bloom;
 uniform float cold;
+uniform float blueHour;
 uniform float shoreline;
 uniform float valley;
 uniform mat4 worldFromClip;
 float linearDepth(vec2 uv) {
   return -perspectiveDepthToViewZ(texture2D(depth, uv).r, clipPlanes.x, clipPlanes.y);
-}
-vec3 glow(vec2 uv) {
-  vec3 sampleColor = texture2D(image, uv).rgb;
-  float light = dot(sampleColor, vec3(.2126, .7152, .0722));
-  return sampleColor * smoothstep(.90, 2.35, light);
 }
 void main() {
   vec3 color = texture2D(image, vUv).rgb;
@@ -69,23 +66,39 @@ void main() {
     vec3 air = mix(vec3(.47,.49,.49), vec3(.11,.17,.27), cold);
     color = mix(color, air, thickness);
   }
-  if (bloom > 0.0) {
-    vec3 light = vec3(0.0);
-    for (int i = 0; i < 6; i++) {
-      float angle = float(i) * 1.04719755;
-      vec2 ray = vec2(cos(angle), sin(angle)) * pixel;
-      light += glow(vUv + ray * 7.0) * .08 + glow(vUv + ray * 24.0) * .033;
-    }
-    color += light * bloom;
-  }
+  color += texture2D(bloomImage, vUv).rgb * bloom;
   float luma = dot(color, vec3(.2126, .7152, .0722));
   color = mix(vec3(luma), color, mix(1.04, .91, cold));
   color *= mix(vec3(1.04, 1.005, .965), vec3(.94, 1.01, 1.08), cold);
+  float shadowLift = 1.0 - smoothstep(.012, .16, luma);
+  color = color * (1.0 + .38 * blueHour) + vec3(.005, .009, .018) * shadowLift * blueHour;
   vec2 frame = (vUv - .5) * vec2(1.05, .82);
   color *= 1.0 - dot(frame, frame) * .14;
   gl_FragColor = vec4(max(color, 0.0), 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
+}`;
+
+const blurFragment = /* glsl */`
+varying vec2 vUv;
+uniform sampler2D image;
+uniform vec2 increment;
+uniform bool brightOnly;
+
+vec3 lightAt(vec2 uv) {
+  vec3 light = texture2D(image, uv).rgb;
+  if (brightOnly) {
+    float luminance = dot(light, vec3(.2126, .7152, .0722));
+    light = min(vec3(12.0), light) * smoothstep(.82, 2.0, luminance);
+  }
+  return light;
+}
+
+void main() {
+  vec3 light = lightAt(vUv) * .227027;
+  light += (lightAt(vUv + increment * 1.384615) + lightAt(vUv - increment * 1.384615)) * .316216;
+  light += (lightAt(vUv + increment * 3.230769) + lightAt(vUv - increment * 3.230769)) * .070270;
+  gl_FragColor = vec4(light, 1.0);
 }`;
 
 export class ShowpieceLight {
@@ -94,8 +107,15 @@ export class ShowpieceLight {
   private readonly ambient = new HemisphereLight(0xb2c9e4, 0x655741, 1.1);
   private readonly fog = new FogExp2(0xc7c5b2, .00042);
   private readonly target = new WebGLRenderTarget(1, 1, {type: HalfFloatType, depthTexture: new DepthTexture(1, 1)});
+  private readonly bloomX = new WebGLRenderTarget(1, 1, {type: HalfFloatType, depthBuffer: false});
+  private readonly bloomY = new WebGLRenderTarget(1, 1, {type: HalfFloatType, depthBuffer: false});
   private readonly postScene = new Scene();
+  private readonly blurScene = new Scene();
   private readonly postCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  private readonly blur = new ShaderMaterial({
+    vertexShader: gradeVertex, fragmentShader: blurFragment, depthTest: false, depthWrite: false,
+    uniforms: { image: {value: this.target.texture}, increment: {value: new Vector2()}, brightOnly: {value: true} },
+  });
   private readonly materials = new WeakSet<Material>();
   private readonly watched = new WeakSet<object>();
   private readonly dusk = new ShaderMaterial({
@@ -116,9 +136,9 @@ export class ShowpieceLight {
   private readonly post = new ShaderMaterial({
     vertexShader: gradeVertex, fragmentShader: gradeFragment, depthTest: false, depthWrite: false,
     uniforms: {
-      image: {value: this.target.texture}, depth: {value: this.target.depthTexture},
+      image: {value: this.target.texture}, depth: {value: this.target.depthTexture}, bloomImage: {value: this.bloomY.texture},
       pixel: {value: new Vector2(1, 1)}, clipPlanes: {value: new Vector2(.06, 18000)},
-      occlusion: {value: .7}, bloom: {value: .55}, cold: {value: 0},
+      occlusion: {value: .7}, bloom: {value: .55}, cold: {value: 0}, blueHour: {value: 0},
       shoreline: {value: 0}, valley: {value: 0}, worldFromClip: {value: new Matrix4()},
     },
   });
@@ -146,9 +166,12 @@ export class ShowpieceLight {
        vec3 SeptemberSky = mix(vec3(.72, .82, 1.07), vec3(1.18, .85, .61), horizonGold);
        gl_FragColor = vec4(texColor * SeptemberSky + horizonGold * vec3(.023, .008, .002), 1.0);`,
     );
-    const skyMesh = new Mesh(new PlaneGeometry(2, 2), this.post);
-    skyMesh.frustumCulled = false;
-    this.postScene.add(skyMesh);
+    const screen = new PlaneGeometry(2, 2);
+    const postQuad = new Mesh(screen, this.post);
+    const blurQuad = new Mesh(screen, this.blur);
+    postQuad.frustumCulled = blurQuad.frustumCulled = false;
+    this.postScene.add(postQuad);
+    this.blurScene.add(blurQuad);
     scene.add(this.sky, this.ambient);
     scene.fog = this.fog;
     this.csm = new CSM({
@@ -203,7 +226,7 @@ export class ShowpieceLight {
     this.target.samples = quality === 'ultra' ? 2 : 0;
     this.target.dispose();
     this.post.uniforms.occlusion.value = quality === 'low' ? 0 : quality === 'high' ? .65 : 1.0;
-    this.post.uniforms.bloom.value = quality === 'low' ? 0 : .57;
+    this.post.uniforms.bloom.value = quality === 'low' ? 0 : .43;
     for (const light of this.csm.lights) {
       light.castShadow = true;
       const size = quality === 'ultra' ? 2048 : quality === 'high' ? 1536 : 1024;
@@ -219,6 +242,10 @@ export class ShowpieceLight {
     const x = Math.max(1, Math.round(width * ratio));
     const y = Math.max(1, Math.round(height * ratio));
     this.target.setSize(x, y);
+    const quarterX = Math.max(1, Math.round(x / 4));
+    const quarterY = Math.max(1, Math.round(y / 4));
+    this.bloomX.setSize(quarterX, quarterY);
+    this.bloomY.setSize(quarterX, quarterY);
     this.post.uniforms.pixel.value.set(1 / x, 1 / y);
   }
 
@@ -236,13 +263,15 @@ export class ShowpieceLight {
     physical.uniforms.cloudDensity.value = overcast ? .76 : .33;
     physical.uniforms.cloudScale.value = .00037;
     physical.uniforms.cloudElevation.value = .64;
+    physical.uniforms.showSunDisc.value = overcast ? 0 : 1;
     this.direct = night ? .29 : overcast ? 1.12 : 3.35;
-    this.fill = night ? .56 : overcast ? 2.05 : 1.57;
+    this.fill = night ? 1.47 : overcast ? 2.05 : 1.57;
     this.ambient.color.setHex(night ? 0x91acdf : overcast ? 0xd3e2f1 : 0xb8cde4);
-    this.ambient.groundColor.setHex(night ? 0x261d27 : snow ? 0x9faebe : 0x76654e);
+    this.ambient.groundColor.setHex(night ? 0x545d74 : snow ? 0x9faebe : 0x76654e);
     this.fog.color.set(new Color(night ? 0x435778 : snow ? 0x9aafc6 : weather === 'rain' ? 0x9eacb0 : 0xaebcc5));
     this.density = snow ? .00215 : weather === 'rain' ? .0011 : night ? .00058 : .00048;
     this.post.uniforms.cold.value = night ? 1 : snow ? .78 : 0;
+    this.post.uniforms.blueHour.value = Number(night);
     for (const light of this.csm.lights) light.color.setHex(night ? 0xa0b7ff : overcast ? 0xfcf2e1 : 0xffcf8e);
   }
 
@@ -278,6 +307,16 @@ export class ShowpieceLight {
     this.post.uniforms.worldFromClip.value.multiplyMatrices(this.camera.matrixWorld, this.camera.projectionMatrixInverse);
     renderer.setRenderTarget(this.target);
     renderer.render(this.scene, this.camera);
+    this.blur.uniforms.image.value = this.target.texture;
+    this.blur.uniforms.increment.value.set(1 / this.bloomX.width, 0);
+    this.blur.uniforms.brightOnly.value = true;
+    renderer.setRenderTarget(this.bloomX);
+    renderer.render(this.blurScene, this.postCamera);
+    this.blur.uniforms.image.value = this.bloomX.texture;
+    this.blur.uniforms.increment.value.set(0, 1 / this.bloomY.height);
+    this.blur.uniforms.brightOnly.value = false;
+    renderer.setRenderTarget(this.bloomY);
+    renderer.render(this.blurScene, this.postCamera);
     renderer.setRenderTarget(null);
     renderer.render(this.postScene, this.postCamera);
   }

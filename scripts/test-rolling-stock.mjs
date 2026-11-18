@@ -91,7 +91,7 @@ test('showpiece shell retains textured glazing and applies weather to paint and 
   const base = { speed: 0, throttle: 0, brake: 1, doorsOpen: false, night: false };
   update({ ...base, weather: 'rain' });
   assert.equal(shader.uniforms.stockSnow.value, 0);
-  assert.equal(glazing.material.emissiveIntensity, 0.025);
+  assert.ok(glazing.material.emissiveIntensity > 0 && glazing.material.emissiveIntensity < .15);
   const wetRoughness = paint.clearcoatRoughness;
   update({ ...base, weather: 'snow', night: true });
   assert.ok(shader.uniforms.stockSnow.value > 0);
@@ -107,9 +107,11 @@ test('showpiece windscreen draws only in weather and parks both wipers in clear 
   globalThis.document = { createElement: () => ({ getContext: () => context }) };
   const { group, update } = createCab(undefined, true);
   const pane = group.getObjectByName('Cab windscreen weather');
+  const glass = group.getObjectByName('Cab windscreen glazing');
   const wipers = group.children.filter(item => item.name === 'Cab windscreen wiper');
   const parked = wipers.map(item => item.quaternion.clone());
   assert.equal(pane.visible, false);
+  assert.ok(glass.visible && glass.material.transparent && !glass.material.depthWrite);
   assert.equal(pane.geometry.attributes.uv.count, 4);
   assert.equal(wipers.length, 2);
   const state = { speed: 1, throttle: 0, brake: 0, doorsOpen: false, night: true, deltaSeconds: 0.45 };

@@ -29,6 +29,8 @@ import type { Rail } from './rail';
 import { gabledRoof } from './roof.ts';
 import type { GabledRoof } from './roof.ts';
 import { blendExposedRock, civilTexture } from './scenery-materials.ts';
+import { applyWaterBanks, createShorelineField } from './lake-surface.ts';
+import { buildRiverSurface } from './river-surface.ts';
 import { decorrelateWaterNormals } from './water-reflection.ts';
 import type { WaterReflection } from './water-reflection.ts';
 import { createVegetation } from './vegetation.ts';
@@ -1915,45 +1917,27 @@ function contours(data: WorldData, points: LocalPoint[]) {
   return result;
 }
 
-function addWater(group: Group, data: WorldData, surface: MeshStandardMaterial, polished: boolean, reflection?: WaterReflection) {
+function addWater(group: Group, data: WorldData, surface: MeshStandardMaterial, polished: boolean,
+  reflection?: WaterReflection, placement?: SceneryPlacement) {
   const released: (() => void)[] = [];
-  for (const feature of data.features) {
-    if (feature.type !== 'water') continue;
+  const bodies = data.features.filter(feature => feature.type === 'water');
+  if (polished && bodies.length) applyWaterBanks(surface, createShorelineField(data.terrain, bodies));
+  for (const feature of bodies) {
     const outline = contours(data, polygon(feature.points));
     if (outline.length < 3) continue;
     const heights = outline.map(([x, y]) => elevationAt(data, x, -y)).sort((a, b) => a - b);
     const waterLevel = heights[Math.floor(heights.length * 0.38)] + 0.11;
     const holes = (feature.holes ?? []).map((hole) => contours(data, polygon(hole))).filter((hole) => hole.length >= 3);
     const rings = [...outline, ...holes.flat()];
-    const vertices = rings.flatMap(([x, y]) => [x, waterLevel, -y]);
-    const uv = rings.flatMap(([x, y]) => [x / 18, y / 18]);
     const indices = triangles(outline, holes);
-    let faces = indices;
-    const colors: number[] = [];
-    if (polished) {
-      const shore = new Color(0x84a39e);
-      const deep = new Color(0x456379);
-      const tint = new Color();
-      const banks = [outline, ...holes];
-      for (let index = 0; index < rings.length; index++) colors.push(shore.r, shore.g, shore.b);
-      faces = [];
-      for (let index = 0; index < indices.length; index += 3) {
-        const a = indices[index];
-        const b = indices[index + 1];
-        const c = indices[index + 2];
-        const x = (rings[a][0] + rings[b][0] + rings[c][0]) / 3;
-        const y = (rings[a][1] + rings[b][1] + rings[c][1]) / 3;
-        const indexOfCenter = vertices.length / 3;
-        vertices.push(x, waterLevel, -y);
-        uv.push(x / 18, y / 18);
-        const level = waterLevel - elevationAt(data, x, -y);
-        const bank = banks.some(bank => nearBoundary(x, y, bank, 5));
-        tint.copy(shore).lerp(deep, Math.max(smoothstep((level + 0.25) / 2.4), bank ? 0.05 : 0.67));
-        colors.push(tint.r, tint.g, tint.b);
-        faces.push(a, b, indexOfCenter, b, c, indexOfCenter, c, a, indexOfCenter);
-      }
-    }
-    const water = mesh(vertices, faces, surface, polished ? colors : undefined, uv);
+    const river = polished && feature.tags.water === 'river' ? buildRiverSurface(rings, indices,
+      (east, north) => elevationAt(data, east, -north), data.terrain.spacing,
+      [data.terrain.east, data.terrain.north], placement && ((east, north) => placement.ownsCell(east, -north))) : undefined;
+    const points = river?.points ?? rings;
+    if (!points.length) continue;
+    const vertices = points.flatMap(([east, north], index) => [east, river?.heights[index] ?? waterLevel, -north]);
+    const uv = points.flatMap(([east, north]) => [east / 18, north / 18]);
+    const water = mesh(vertices, river?.indices ?? indices, surface, undefined, uv);
     water.receiveShadow = false;
     group.add(water);
     if (polished && reflection) released.push(reflection.register(water, waterLevel));
@@ -2478,6 +2462,7 @@ export interface SceneryMaps {
   ballast?: Texture;
   spruce?: Texture;
   pineAndBirch?: Texture;
+  terrainDetail?: Texture;
   waterReflection?: WaterReflection;
   siding?: Texture;
   roofing?: Texture;
@@ -2541,7 +2526,6 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   fixtures.emissive.setHex(0xffc581);
   const water = material(polished ? 0x819ca9 : 0x365762, 0.19, 0.05);
   water.side = DoubleSide;
-  water.vertexColors = polished;
   water.normalMap = waterNormals();
   water.normalScale.set(0.22, 0.28);
   water.envMapIntensity = polished ? 1.55 : 1.15;
@@ -2550,7 +2534,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   const snow = [coatedBySnow(ground, 0.92), coatedBySnow(distantGround, 0.92), coatedBySnow(ballast, 0.57),
     coatedBySnow(roofs, 0.87), coatedBySnow(concrete, 0.29)];
   if (foliage && distantFoliage) snow.push(coatedBySnow(foliage, 0.64, true), coatedBySnow(distantFoliage, 0.64, true));
-  if (exposedRock) blendExposedRock(ground, exposedRock);
+  if (exposedRock) blendExposedRock(ground, exposedRock, maps.terrainDetail);
   const nearby = routeIndex(placement?.gradeRail ?? rail, placement?.gradeSpans ?? data.spans);
   const paint = terrainPalette(data, nearby, Boolean(exposedRock));
   const terrain = createTerrain(data, nearby, ground, paint, Boolean(exposedRock), placement?.ownsCell);
@@ -2559,7 +2543,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   const applyTrackDetail = addTrack(group, data, rail, ballast, concrete, nearby,
     exposedRock ? { surface: ground, paint } : undefined);
   addParallelTracks(group, data, nearby, ballast, polished);
-  const releaseWater = addWater(group, data, water, polished, maps.waterReflection);
+  const releaseWater = addWater(group, data, water, polished, maps.waterReflection, placement);
   addBuildings(group, data, windows, roofs, maps.siding, nearby, polished);
   const vegetation = polished ? createVegetation(data, rail, {
     ownsCell: placement?.ownsCell,

@@ -29,6 +29,7 @@ Press **L** for the interactive practice session. Follow its instructions to rel
 | P | Pause or resume |
 | L / R | Practice / restart the service |
 | A | Toggle automatic driving |
+| Esc | Dismiss a stop result |
 
 Release Brake 5 with Q before applying power. The lower-left guidance shows an approach speed and a suggested power or brake notch. The route panel previews the next signal and speed change. Stop beside the amber marker, open the doors, let passengers board, and close the doors before departing. Wet and snowy rail change traction and braking response. Result cards show stopping accuracy, timetable margin, passengers and score.
 

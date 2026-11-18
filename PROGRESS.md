@@ -156,6 +156,14 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - Two reviewers received only the fourteen renders. Their scores put the lowest visual category at 1/10. The leading issues were fan-shaped lake shading, sharp night beams, cab and passenger materials, and the visibility of the tunnel and train in overhead views. [Review A](reference/r40/review-a.md) · [Review B](reference/r40/review-b.md)
 - The independent keyboard reviewer finished all six practice steps and started the manual service. The visual refinements and the full release verification remain in progress.
 
+## Refinements from the first visual review
+
+- Removed the lake’s triangulated color bands using a distance field from the mapped shores and island holes. Flowing water follows the source terrain cells. Added nearshore translucency and broke up reflections across the water surface.
+- Replaced spaced bloom samples with two blur passes, softened and weathered headlight beams, improved blue-hour shadow detail, and moved precipitation with the camera. Added a reflective cab windscreen, fine desk grain and meter illumination. The dry ground now blends an original grass, heather, forest litter and rock atlas.
+- Reframed the tunnel and lake views, captured their new before frames and generated matching paint-overs. The track and the mapped capture positions remain the same. Kept vegetation outside the mapped portals, opened the waiting shelter, corrected passenger silhouettes and cleared the terrain from the Voss platforms and sidings.
+- Tests cover shore and island distance fields, river tessellation, camera framing, vehicle materials and passenger paths. The full five-tile R40 clearance audit still passes with a maximum 0.316 m gap and zero coach intersections. The remaining independent renders and scores are pending.
+- After the keyboard reviewer’s first overshoot, the HUD now shows metres past the marker, differentiates rolling from stopped at low speed, moves the help panel clear of the gauges and labels the time-compression key.
+
 - Graduated trackside tree height from maintained suckers to mature woodland. In the same lakeside scene, the tallest rooted tree within 14 m of rail fell from 17.56 m to 2.78 m, and the tallest within 26 m fell from 18.95 m to 5.01 m. The mapped forest footprint and shrub exclusions still apply.
 - Added autumn colour within the birch shader using leaf chroma before any instance tint. In the original cutout, the mask strongly selected 75% of the sampled opaque canopy pixels and selected zero of the 4,023 sampled bare-stem pixels. Pine and spruce bypass the autumn mask.
 

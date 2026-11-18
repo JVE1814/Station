@@ -559,8 +559,8 @@ function noseDetails(body: Group, trim: MeshStandardMaterial, showpiece: boolean
     }
     box(body, bracket, [0.22, 0.042, 0.031], [0, 0.69, -12.40]);
   }
-  const light = trainHeadlight(body, showpiece);
-  return { lamp, light, halos };
+  const headlight = trainHeadlight(body, showpiece);
+  return { lamp, headlight, halos };
 }
 
 function headlampGlow() {
@@ -594,7 +594,7 @@ function trainHeadlight(body: Group, showpiece = false) {
       blending: AdditiveBlending,
       depthWrite: false,
       transparent: true,
-      uniforms: { beamScattering: { value: showpiece ? 0.054 : 0.045 } },
+      uniforms: { beamScattering: { value: showpiece ? 0.016 : 0.045 } },
       vertexShader: `
         varying vec3 viewNormal;
         varying vec3 viewRay;
@@ -613,7 +613,7 @@ function trainHeadlight(body: Group, showpiece = false) {
         varying float distanceAlong;
         void main() {
           float facing = abs(dot(normalize(viewNormal), normalize(viewRay)));
-          float angle = smoothstep(0.04, 0.50, facing);
+          float angle = ${showpiece ? 'pow(smoothstep(0.02, 0.82, facing), 1.9)' : 'smoothstep(0.04, 0.50, facing)'};
           float falloff = smoothstep(0.0, 0.09, distanceAlong)
             * (1.0 - smoothstep(0.18, 1.0, distanceAlong));
           gl_FragColor = vec4(1.0, 0.77, 0.49, angle * falloff * beamScattering);
@@ -626,7 +626,10 @@ function trainHeadlight(body: Group, showpiece = false) {
   beam.position.set(0, -Math.sin(depression) * length / 2, -Math.cos(depression) * length / 2);
   light.add(beam);
   body.add(light, light.target);
-  return light;
+  return (enabled: boolean, weather?: TrainVisualState['weather']) => {
+    light.visible = enabled;
+    if (showpiece) beam.material.uniforms.beamScattering.value = weather === 'snow' ? .046 : weather === 'rain' ? .029 : .016;
+  };
 }
 
 function snowOnPaint(material: MeshPhysicalMaterial) {
@@ -670,7 +673,7 @@ export function createTrain(leading = true, brushedSteel?: Texture, showpiece = 
   windowMaterial.emissive.setHex(showpiece ? 0xffbb75 : 0xfda655);
   if (showpiece) {
     windowMaterial.emissiveMap = interiorAtlas();
-    windowMaterial.envMapIntensity = 1.36;
+    windowMaterial.envMapIntensity = 1.62;
   }
   fitExtDetails(group, materials, leading, windowMaterial, showpiece);
   const updateDoors = slidingDoors(group, materials);
@@ -688,7 +691,7 @@ export function createTrain(leading = true, brushedSteel?: Texture, showpiece = 
   });
   batchRigidShadow(group);
   function update(state: TrainVisualState) {
-    windowMaterial.emissiveIntensity = state.night ? (showpiece ? 1.85 : 0.75) : 0.025;
+    windowMaterial.emissiveIntensity = state.night ? (showpiece ? 1.85 : 0.75) : showpiece ? .063 : .025;
     if (paintedShell instanceof MeshPhysicalMaterial) {
       paintedShell.roughness = state.weather === 'rain' ? 0.24 : 0.33;
       paintedShell.clearcoatRoughness = state.weather === 'rain' ? 0.09 : 0.16;
@@ -699,7 +702,7 @@ export function createTrain(leading = true, brushedSteel?: Texture, showpiece = 
       const head = state.headlights !== false;
       lights.lamp.emissive.setHex(head ? 0xffd9a5 : 0xef382b);
       lights.lamp.emissiveIntensity = state.night ? (showpiece ? 4.8 : 3.8) : 0.62;
-      lights.light.visible = state.night && head;
+      lights.headlight(state.night && head, state.weather);
       for (const halo of lights.halos) {
         halo.material.color.setHex(head ? 0xffffff : 0xec422f);
         halo.visible = state.night;
@@ -947,6 +950,15 @@ function wetWindscreen(group: Group, trim: MeshStandardMaterial) {
   ]), 3));
   geometry.setAttribute('uv', new BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2));
   geometry.setIndex([0, 1, 2, 0, 2, 3]);
+  geometry.computeVertexNormals();
+  const glazing = new MeshPhysicalMaterial({
+    color: 0xa5bcc7, metalness: .12, roughness: .13, clearcoat: .92, clearcoatRoughness: .11,
+    envMapIntensity: 1.12, transparent: true, opacity: .037, depthWrite: false,
+  });
+  const glass = new Mesh(geometry, glazing);
+  glass.name = 'Cab windscreen glazing';
+  glass.renderOrder = 11;
+  group.add(glass);
   const material = new ShaderMaterial({
     name: 'Windscreen rain and frost',
     uniforms: {
@@ -974,6 +986,8 @@ function wetWindscreen(group: Group, trim: MeshStandardMaterial) {
           fract(paneUv.y + rain * time * 0.20));
         vec3 pattern = texture2D(marks, slide).rgb;
         float opacity = mix(pattern.g, pattern.r * 0.47 + pattern.b * 0.33, rain);
+        vec2 inset = min(paneUv, 1.0 - paneUv);
+        opacity *= smoothstep(.013, .074, min(inset.x, inset.y));
         if (opacity < 0.011) discard;
         vec3 frost = vec3(0.67, 0.82, 0.93);
         vec3 drop = mix(vec3(0.22, 0.32, 0.42), vec3(0.68, 0.79, 0.85), pattern.b);
@@ -992,6 +1006,7 @@ function wetWindscreen(group: Group, trim: MeshStandardMaterial) {
     const wet = state.weather === 'rain';
     const snow = state.weather === 'snow';
     pane.visible = wet || snow;
+    glazing.opacity = state.night ? .026 : wet || snow ? .051 : .037;
     time += state.deltaSeconds ?? 1 / 60;
     material.uniforms.time.value = time % 300;
     material.uniforms.rain.value = Number(wet);
@@ -1003,11 +1018,14 @@ function wetWindscreen(group: Group, trim: MeshStandardMaterial) {
 }
 
 function makeCabGeometry(group: Group, grain?: Texture, showpiece = false) {
-  const charcoal = surface(0x2a3338, 0.88, 0.1);
-  const dashboard = showpiece ? surface(0x434d53, 0.64, 0.09) : surface(0x485156, 0.76, 0.09);
+  const deskGrain = showpiece ? grain?.clone() : grain;
+  if (showpiece) deskGrain?.repeat.set(3.2, 2.9);
+  const charcoal = surface(showpiece && grain ? 0xbec3bd : 0x2a3338, 0.88, 0.1);
+  const dashboard = showpiece ? surface(grain ? 0xf1e9dc : 0x4b4d4a, 0.61, 0.09) : surface(0x485156, 0.76, 0.09);
   for (const material of [charcoal, dashboard]) {
-    material.bumpMap = grain ?? null;
-    material.bumpScale = 0.018;
+    material.bumpMap = deskGrain ?? null;
+    material.bumpScale = showpiece ? 0.0045 : 0.018;
+    if (showpiece) material.map = deskGrain ?? null;
   }
   const trim = surface(0x10191d, 0.79, 0.12);
   const rubber = surface(0x171e22, 0.92, 0);
@@ -1099,7 +1117,8 @@ function makeCabGeometry(group: Group, grain?: Texture, showpiece = false) {
   else labels.forEach(label => cabLabels(controls, [label]));
 
   const fill = new PointLight(new Color(0xffdbac), 1.2, 2.9, 2);
-  fill.position.set(0.38, 2.64, -9.90);
+  if (showpiece) fill.position.set(-0.15, 2.86, -9.93);
+  else fill.position.set(0.38, 2.64, -9.90);
   group.add(fill);
   batchRigidParts(dash);
   batchRigidParts(controls);
@@ -1129,9 +1148,9 @@ export function createCab(grain?: Texture, showpiece = false) {
     instruments.brake.rotation.x = -0.51 + state.brake * 1.05;
     instruments.amber.emissiveIntensity = state.doorsOpen ? 1.4 : 0.1;
     instruments.green.emissiveIntensity = state.doorsOpen ? 0.08 : 0.8;
-    instruments.fill.intensity = 1.95;
-    instruments.fill.visible = state.night;
-    headlight.visible = state.night;
+    instruments.fill.intensity = showpiece && !state.night ? 2.55 : 1.95;
+    instruments.fill.visible = showpiece || state.night;
+    headlight(state.night, state.weather);
   }
   return { group, eye, update };
 }

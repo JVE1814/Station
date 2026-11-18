@@ -77,6 +77,23 @@ export function skyReflection(night: boolean): DataTexture {
   return texture;
 }
 
+function particleTexture(snow: boolean): DataTexture {
+  const size = 32;
+  const pixels = new Uint8Array(size * size * 4).fill(255);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = (x + .5) / size * 2 - 1;
+      const v = (y + .5) / size * 2 - 1;
+      const distance = Math.hypot(u * (snow ? 1 : 4.8), v * (snow ? 1 : .86));
+      pixels[(y * size + x) * 4 + 3] = 255 * Math.max(0, 1 - distance ** 2) ** 2;
+    }
+  }
+  const map = new DataTexture(pixels, size, size);
+  map.minFilter = map.magFilter = LinearFilter;
+  map.needsUpdate = true;
+  return map;
+}
+
 export class Atmosphere {
   private readonly sun = new DirectionalLight(0xffe0af, 2.7);
   private readonly fill = new HemisphereLight(0xc3e0ff, 0x76684e, 2.2);
@@ -91,6 +108,7 @@ export class Atmosphere {
   );
   private readonly particles: Points<BufferGeometry, PointsMaterial>;
   private readonly positions: Float32Array;
+  private readonly precipitation?: { rain: DataTexture; snow: DataTexture };
   private weather: Weather = 'clear';
   private density = 0.00013;
   private sunLevel = 2.7;
@@ -99,6 +117,7 @@ export class Atmosphere {
   private liveStockShadows = true;
 
   constructor(private readonly scene: Scene, stockShadowLayer: number, showpiece = false) {
+    if (showpiece) this.precipitation = { rain: particleTexture(false), snow: particleTexture(true) };
     this.sun.castShadow = true;
     this.sun.shadow.camera.layers.enable(stockShadowLayer);
     this.sun.shadow.mapSize.set(1024, 1024);
@@ -117,7 +136,7 @@ export class Atmosphere {
     this.dome.frustumCulled = false;
     if (!showpiece) this.scene.add(this.dome);
 
-    this.positions = new Float32Array(1600 * 3);
+    this.positions = new Float32Array((showpiece ? 2900 : 1600) * 3);
     for (let index = 0; index < this.positions.length; index += 3) {
       this.positions[index] = (Math.random() - 0.5) * (showpiece ? 100 : 68);
       this.positions[index + 1] = Math.random() * 33;
@@ -153,6 +172,11 @@ export class Atmosphere {
     this.fill.color.setHex(night ? 0xa6bbf1 : 0xc3e0ff);
     this.sun.shadow.needsUpdate = true;
     this.particles.material.size = weather === 'snow' ? 0.12 : 0.05;
+    if (this.precipitation) {
+      this.particles.material.map = this.precipitation[weather === 'snow' ? 'snow' : 'rain'];
+      this.particles.material.needsUpdate = true;
+      this.particles.material.size = weather === 'snow' ? .19 : .20;
+    }
     this.particles.visible = weather !== 'clear';
   }
 
@@ -190,8 +214,8 @@ export class Atmosphere {
     }
     this.particles.visible = this.weather !== 'clear' && !underCover;
     if (!this.particles.visible) return;
-    this.particles.position.copy(position);
-    this.particles.position.y -= 3;
+    this.particles.position.copy(this.precipitation ? cameraPosition : position);
+    this.particles.position.y -= this.precipitation ? 13 : 3;
     this.particles.updateMatrixWorld();
     const fall = this.weather === 'snow' ? 2.1 : 15;
     for (let index = 1; index < this.positions.length; index += 3) {

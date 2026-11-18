@@ -15,6 +15,7 @@ The data cache holds original downloads. Baked application data will retain attr
 ## Evanger–Voss showpiece
 
 - The spruce, pine and birch canopy, trackside plants, rock and soil strata, pitched-roof architecture and weatherable surfaces use the route's mapped geometry and original procedural art. `public/assets/norway-trees.webp` is an original GPT Image pine and birch cutout atlas.
+- `public/assets/r40-ground.webp` is an original GPT Image albedo atlas of dry autumn grass, heather, spruce litter and fractured rock. The ground shader blends these surfaces by land cover and slope.
 - The showpiece rolling stock uses the existing steel and dashboard maps with original procedural passenger-window and windscreen weather textures in `src/rolling-stock.ts`. The exterior and cabin remain unbranded.
 - The physical daylight sky uses three.js Sky. The dusk sky, haze, ambient occlusion, grade and bloom are authored shaders in `src/showpiece-light.ts`.
 - The `-golden-paintover.png` frames in `reference/r40/` are original GPT Image paint-overs of the corresponding before screenshots. The application renders the final frames independently from offline terrain, objects, materials and lighting.

@@ -157,7 +157,7 @@ const tutorial: readonly TutorialStep[] = [
   { title: 'Move off', prompt: 'Press W three times. Wait for the train to reach 12 km/h.' },
   { title: 'Feel the train coast', prompt: 'Press S until Power reads 0, then coast for two seconds.' },
   { title: 'Come to a stop', prompt: 'Press E three times and wait for the train to stop.' },
-  { title: 'Operate the doors', prompt: 'Press D to open the doors once the train stops.' },
+  { title: 'Operate the doors', prompt: 'Press D to open the doors. On the service, stop by the amber marker before opening.' },
   { title: 'See the train from outside', prompt: 'Press D to close the doors, then 2 for the chase camera.' },
   { title: 'Ready for Evanger–Voss', prompt: 'Press R to return to the platform and begin the run.' },
 ];

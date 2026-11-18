@@ -2,7 +2,7 @@
 
 Each golden-hour strip shows the baseline frame, the GPT Image paint-over of that frame, and the final Ultra render from left to right. Strips are 5760 × 1080. Each baseline and final frame is 1920 × 1080. The paint-over is scaled to fit its panel.
 
-The baseline uses the original renderer from `f90feff` with an adapter for the Evanger–Voss route and matching camera poses. Each original PNG was the input to its paired GPT Image edit. The game renders the final panels from the local route and scenery assets.
+The baseline uses the original renderer from `f90feff` with an adapter for the Evanger–Voss route and matching camera poses. Each original PNG was the input to its paired GPT Image edit. The game renders the final panels from the local route and scenery assets. The images use the rendering code in `ff6e794`. The following playability and verification changes retain the same camera poses and rendering code.
 
 | Shot | Golden-hour comparison | Blue hour | Heavy snow |
 | --- | --- | --- | --- |
@@ -41,6 +41,6 @@ Use `--only=01` to select the first shot or `--dir=/path/to/gallery` to work in 
 
 ## Independent visual review
 
-[Reviewer A’s notes](review-a.md) · [Reviewer B’s notes](review-b.md)
+Both reviewers scored all fourteen final renders. Their lowest categories were 2/10 and 2.9/10. The requested 8/10 in each category remains unmet. The lowest score held through three successive revisions, ending visual iteration after Round 5. [Reviewer A’s final notes](review-a.md#round-5) · [Reviewer B’s final notes](review-b.md#round-5)
 
 [Keyboard playtest and stop cards](keyboard/README.md)

@@ -39,9 +39,9 @@ export class CabEffort {
 
   update(command: DriverControls, direct: boolean): DriverControls {
     const applied = this.applied;
-    const power = command.brake > 0 || command.doorsOpen ? 0 : command.throttle;
     applied.brake = direct ? command.brake : ramp(applied.brake, command.brake, 0.82, 0.65);
-    applied.throttle = direct ? power : ramp(applied.throttle, power, 1.15, 0.5);
+    applied.throttle = (command.doorsOpen || applied.brake > 0) ? 0
+      : direct ? command.throttle : ramp(applied.throttle, command.throttle, 1.15, 0.5);
     applied.doorsOpen = command.doorsOpen;
     return applied;
   }
@@ -78,14 +78,14 @@ export function stepTrain(
     : controls.throttle * fullTraction(state.speed) * grip.traction;
   const effort = traction - controls.brake * SERVICE_DECELERATION * grip.brake - resistance(state.speed, gradient);
   const jerkStep = COMFORT_JERK * STEP;
+  const held = controls.doorsOpen || (state.speed === 0 && controls.brake > 0);
   // Preserve enough speed to release the remaining deceleration before standstill.
   const stoppingEnvelope = jerkStep - Math.sqrt(jerkStep ** 2 + 2 * COMFORT_JERK * state.speed);
-  const target = Math.max(effort, stoppingEnvelope);
+  const target = held && state.speed === 0 ? 0 : Math.max(effort, stoppingEnvelope);
   const acceleration = Math.min(
     state.acceleration + jerkStep,
     Math.max(state.acceleration - jerkStep, target),
   );
-  const held = controls.doorsOpen || (state.speed === 0 && controls.brake > 0);
   const speed = held ? 0 : Math.max(0, state.speed + acceleration * STEP);
   return {
     distance: state.distance + (state.speed + speed) * STEP * 0.5,

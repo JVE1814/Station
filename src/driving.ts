@@ -2,6 +2,7 @@ import type { SignalAspect } from './blocks';
 import type { DriverControls, TrainState, RailSurface } from './dynamics';
 
 export const PLATFORM_TOLERANCE = 7;
+export const STOPPED_SPEED = 0.0005;
 
 export interface SignalPreview {
   label: string;
@@ -178,7 +179,7 @@ export class DrivingTutorial {
       controls.brake === 0,
       controls.throttle >= 0.6 && state.speed >= 12 / 3.6,
       this.coastingSince !== null && state.elapsed - this.coastingSince >= 2,
-      controls.brake >= 0.6 && state.speed < 0.02,
+      controls.brake >= 0.6 && state.speed <= STOPPED_SPEED,
       controls.doorsOpen,
       !controls.doorsOpen && view === 'chase',
     ];

@@ -49,10 +49,12 @@ test('controller notches and applied brake and traction are separate', () => {
   for (let i = 0; i < 3; i++) service.adjustNotch('throttle', 0.2);
   assert.deepEqual(service.controls, { throttle: 0.6, brake: 0, doorsOpen: false });
   service.tick(0.05);
-  assert.ok(service.effort.throttle > 0 && service.effort.throttle < service.controls.throttle);
+  assert.equal(service.effort.throttle, 0);
   assert.ok(service.effort.brake > 0.8);
   assert.equal(service.state.speed, 0);
-  service.tick(1.4);
+  service.tick(0.8);
+  assert.ok(service.effort.throttle > 0 && service.effort.throttle < service.controls.throttle);
+  service.tick(1);
   assert.equal(service.effort.throttle, 0.6);
   assert.equal(service.effort.brake, 0);
   assert.ok(service.state.speed > 0);
@@ -76,6 +78,22 @@ test('wet and snowy rail reduce available traction and lengthen braking', () => 
   assert.ok(acceleration[0] > acceleration[1] && acceleration[1] > acceleration[2]);
   const braking = ['clear', 'rain', 'snow'].map(surface => glide(surface, 0, 1, 40).distance);
   assert.ok(braking[0] < braking[1] && braking[1] < braking[2]);
+});
+
+test('releasing stationary brakes on a falling grade respects the jerk limit', () => {
+  const service = new Service(data, rail, { driving: true, distance: 3000 });
+  service.surface = 'snow';
+  service.adjustNotch('brake', -1);
+  service.adjustNotch('throttle', 1);
+  let previousAcceleration = 0;
+  for (let tick = 0; tick < 100; tick++) {
+    const speed = service.state.speed;
+    const state = service.tick(0.05);
+    const acceleration = (state.speed - speed) / 0.05;
+    assert.ok(Math.abs(acceleration - previousAcceleration) / 0.05 <= COMFORT_JERK + 1e-6);
+    previousAcceleration = acceleration;
+  }
+  assert.ok(service.state.speed > 1);
 });
 
 test('preview uses the next signal in the running direction and brakes earlier on snow', () => {

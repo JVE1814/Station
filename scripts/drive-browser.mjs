@@ -1,160 +1,139 @@
 import assert from 'node:assert/strict';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { parseArgs } from 'node:util';
 import { chromium } from 'playwright-core';
 import { preview } from 'vite';
-import { manualNotches } from './manual-driving.mjs';
 
-const server = await preview({ preview: { host: '127.0.0.1', port: 4176 } });
+const { values } = parseArgs({ options: {
+  captures: { type: 'boolean' }, url: { type: 'string' }, quality: { type: 'string' },
+} });
+assert.ok(values.quality === undefined || ['low', 'high', 'ultra'].includes(values.quality));
+const server = values.url ? null : await preview({ preview: { host: '127.0.0.1', port: 4176, strictPort: true } });
+const url = new URL(values.url ?? server.resolvedUrls.local[0]);
+url.searchParams.set('line', 'R40');
+url.searchParams.set('quality', values.quality ?? url.searchParams.get('quality') ?? 'high');
+const output = new URL('../evidence/r40-keyboard/', import.meta.url);
+if (values.captures) await mkdir(output, { recursive: true });
+
 try {
-  const route = JSON.parse(await readFile(new URL('../public/data/service.json', import.meta.url), 'utf8'));
-  const bridge = route.spans.find(span => span.bridge);
-  assert.ok(bridge, 'The checkpoint route has no mapped bridge');
   const browser = await chromium.launch({
     executablePath: process.env.CHROMIUM_PATH ?? '/usr/bin/chromium',
     args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
   });
   try {
-    const drivingViewport = { width: 480, height: 270 };
-    const page = await browser.newPage({ viewport: drivingViewport });
+    const page = await browser.newPage({ viewport: { width: 800, height: 500 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => {
       if (message.type() === 'error') errors.push(message.text());
     });
-    await page.goto(server.resolvedUrls.local[0]);
+    await page.goto(url.href);
     await page.waitForFunction(() => document.getElementById('world').dataset.stage === 'running', null,
-      { timeout: 90_000, polling: 150 });
+      { timeout: 90_000, polling: 120 });
 
     const state = () => page.evaluate(() => {
-      const read = id => document.getElementById(id);
+      const element = id => document.getElementById(id);
+      const text = id => element(id).textContent.trim();
       return {
-        chainage: Number(read('world').dataset.chainage),
-        structure: read('world').dataset.structure,
-        view: read('world').dataset.view,
-        remaining: Number(read('next-stop').textContent.match(/(\d+) m/)?.[1]),
-        speed: Number(read('speed').textContent),
-        limit: Number(read('limit').textContent) || 70,
-        automatic: read('auto').getAttribute('aria-pressed') === 'true',
-        notice: read('notice').textContent,
-        complete: read('next-stop').textContent === 'Service complete',
+        distance: Number(element('world').dataset.chainage),
+        view: element('world').dataset.view,
+        speed: Number(text('speed')),
+        power: Math.round(element('power').value * 5),
+        brake: Math.round(element('brake').value * 5),
+        stoppedAt: text('next-stop'),
+        cue: text('brake-cue'),
+        doors: element('doors').getAttribute('aria-pressed') === 'true',
+        automatic: element('auto').getAttribute('aria-pressed') === 'true',
+        notice: text('notice'),
+        result: element('trip-result').hidden ? null : {
+          station: text('result-title'),
+          score: text('result-score'),
+          timing: text('result-timing'),
+          position: text('result-position'),
+          passengers: text('result-passengers'),
+        },
       };
     });
-    const keys = key => page.keyboard.press(key);
-    const waitForPaint = () => page.evaluate(() =>
-      new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    let controls = { traction: 0, brake: 5 };
-    const setNotches = async (desired) => {
-      const power = desired.traction - controls.traction;
-      const brake = desired.brake - controls.brake;
-      if (power || brake) {
-        await page.evaluate(({ power, brake }) => {
-          for (const [steps, increase, decrease] of [
-            [power, 'more-power', 'less-power'], [brake, 'more-brake', 'less-brake'],
-          ]) {
-            const button = document.getElementById(steps > 0 ? increase : decrease);
-            for (let index = 0; index < Math.abs(steps); index++) button.click();
-          }
-        }, { power, brake });
-        controls = desired;
-      }
+    const press = key => page.keyboard.press(key);
+    const waitForView = view => page.waitForFunction(selected => document.getElementById('world').dataset.view === selected,
+      view, { timeout: 60_000, polling: 120 });
+    const setNotch = async (change, up, down) => {
+      const key = change > 0 ? up : down;
+      for (let step = 0; step < Math.abs(change); step++) await press(key);
     };
-    await keys('t');
-    await keys('t');
-    await setNotches({ traction: 5, brake: 0 });
-    await page.waitForFunction(() => Number(document.getElementById('speed').textContent) > 2, null,
-      { timeout: 120_000, polling: 150 });
-    const departed = await state();
-    assert.equal(departed.automatic, false);
-    console.log(`Manual departure · ${departed.speed} km/h, ${departed.remaining} m to Bulken`);
-    await keys('2');
-    await page.waitForFunction(() => document.getElementById('world').dataset.view === 'chase', null,
-      { timeout: 90_000, polling: 150 });
-    console.log('Switched to chase camera');
-    await keys('3');
-    await page.waitForFunction(() => document.getElementById('world').dataset.view === 'map', null,
-      { timeout: 90_000, polling: 150 });
-    console.log('Switched to bird’s-eye camera');
-    await keys('1');
-    console.log('Returned to cab camera');
+    const setControls = async (current, power, brake) => {
+      if (power === current.power && brake === current.brake) return;
+      await setNotch(power - current.power, 'w', 's');
+      await setNotch(brake - current.brake, 'e', 'q');
+      await page.waitForFunction(([power, brake]) => Math.round(document.getElementById('power').value * 5) === power
+        && Math.round(document.getElementById('brake').value * 5) === brake,
+      [power, brake], { timeout: 15_000, polling: 120 });
+    };
+    const switchDoors = async open => {
+      await press('d');
+      await page.waitForFunction(expected => document.getElementById('doors').getAttribute('aria-pressed') === String(expected),
+        open, { timeout: 15_000, polling: 100 });
+    };
 
-    const snapshots = new Set();
-    const cdp = await page.context().newCDPSession(page);
-    await mkdir('evidence', { recursive: true });
-    let deadline = Date.now() + 30 * 60_000;
-    const capture = async (name, view) => {
-      const started = Date.now();
-      await keys('p');
-      await keys(view === 'cab' ? '1' : '2');
-      await page.waitForFunction(selected => document.getElementById('world').dataset.view === selected,
-        view, { timeout: 120_000, polling: 150 });
-      await page.setViewportSize({ width: 1920, height: 1080 });
-      await page.waitForFunction(() => document.querySelector('#world canvas').width === 1920, null,
-        { timeout: 120_000, polling: 150 });
-      await waitForPaint();
-      const shot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true, optimizeForSpeed: true });
-      await writeFile(`evidence/${name}.png`, Buffer.from(shot.data, 'base64'));
-      console.log(`Captured ${name} at 1080p`);
-      if (name !== 'station') {
-        await page.setViewportSize(drivingViewport);
-        await keys('1');
-        await keys('p');
-      }
-      deadline += Date.now() - started;
-    };
-    let bridgeApproach = false;
-    let approach = 0;
-    let crossed = 0;
+    const departure = await state();
+    await press('t');
+    await press('t');
+    await setControls(departure, 5, 0);
+    await page.waitForFunction(() => Number(document.getElementById('speed').textContent) >= 5, null,
+      { timeout: 60_000, polling: 120 });
+    for (const [key, view] of [['2', 'chase'], ['3', 'map'], ['1', 'cab']]) {
+      await press(key);
+      await waitForView(view);
+    }
+    console.log('Left Evanger in manual mode and switched through all three cameras by keyboard.');
+
+    const deadline = Date.now() + 35 * 60_000;
+    const cards = [];
+    let lastKilometre = -1;
     for (;;) {
       const current = await state();
       assert.equal(current.automatic, false);
-      if (current.complete) {
-        await page.waitForFunction(() => document.getElementById('notice').textContent.includes('Score'), null,
-          { timeout: 60_000, polling: 150 });
-        console.log(await page.locator('#notice').textContent());
-        await capture('station', 'chase');
-        break;
+      assert.ok(Date.now() < deadline, `Keyboard run exceeded its wall-clock allowance near ${current.distance} m`);
+      assert.ok(!current.notice.includes('Stop missed'), `Missed ${current.stoppedAt} at ${current.distance} m`);
+      if (current.result && cards.at(-1)?.station !== current.result.station) {
+        cards.push(current.result);
+        console.log(Object.values(current.result).join(' · '));
+        if (values.captures) {
+          const target = new URL(`${cards.length}-result.png`, output);
+          await writeFile(target, await page.locator('#trip-result').screenshot({ timeout: 30_000 }));
+        }
       }
-      assert.ok(Date.now() < deadline, 'Browser driving exceeded the allotted time');
-      assert.ok(Number.isFinite(current.remaining), 'The next stopping marker is unavailable');
-      assert.ok(!current.notice.includes('Stop missed'), `Missed the stop at route metre ${current.chainage}`);
-      if (Math.floor(current.chainage / 500) > crossed) {
-        crossed = Math.floor(current.chainage / 500);
-        console.log(`Passed route metre ${Math.round(current.chainage)} at ${current.speed} km/h`);
-      }
-      const nextApproach = current.remaining <= 5 ? 3 : current.remaining <= 24 ? 2 : current.remaining <= 120 ? 1 : 0;
-      if (nextApproach > approach) {
-        approach = nextApproach;
-        console.log(`Bulken approach · ${current.remaining} m remaining, ${current.speed} km/h`);
-      }
-      if (!bridgeApproach && current.chainage >= bridge.start - 120 && current.chainage < bridge.end) {
-        bridgeApproach = true;
-        await keys('t');
-        await keys('t');
+      if (current.stoppedAt === 'Service complete') break;
+      if (current.distance > (lastKilometre + 1) * 1000) {
+        lastKilometre = Math.floor(current.distance / 1000);
+        console.log(`Metre ${current.distance.toFixed(0)} · ${current.speed} km/h · ${current.stoppedAt}`);
       }
 
-      await setNotches(manualNotches(current.speed, current.remaining, current.limit));
-      if (current.remaining <= 5 && current.speed === 0) {
-        await keys('d');
-        await waitForPaint();
-        continue;
-      }
-      if (current.structure === 'bridge' && !snapshots.has('bridge')) {
-        snapshots.add('bridge');
-        await capture('bridge', 'chase');
-        await keys('t');
-      }
-      if (current.structure === 'tunnel' && current.chainage > 1885 && !snapshots.has('tunnel')) {
-        snapshots.add('tunnel');
-        await capture('tunnel', 'cab');
+      if (current.doors) {
+        if (current.cue.includes('D to close')) await switchDoors(false);
+      } else if (current.cue.includes('D to open') && current.speed === 0) {
+        await switchDoors(true);
+      } else {
+        const brake = Number(current.cue.match(/\bBrake (\d)/i)?.[1] ?? 0);
+        const advice = current.cue.match(/\bPower (\d)/i)?.[1];
+        const aim = Number(current.cue.match(/(\d+) km\/h/)?.[1]);
+        const belowAim = aim - current.speed;
+        const power = brake ? 0 : advice !== undefined ? Number(advice) : belowAim > 3 ? 5 : belowAim > 1 ? 2 : 0;
+        await setControls(current, power, brake);
       }
       await page.waitForTimeout(120);
     }
-    assert.deepEqual([...snapshots].sort(), ['bridge', 'tunnel']);
+    assert.deepEqual(cards.map(card => card.station.split(' · ')[0]), ['Seimsgrend', 'Bulken', 'Voss']);
+    assert.ok(cards.at(-1).station.includes('Grade'));
+    if (values.captures) await writeFile(new URL('results.json', output), JSON.stringify(cards, null, 2) + '\n');
+    await press('r');
+    await page.waitForFunction(() => document.getElementById('next-stop').textContent.includes('Seimsgrend')
+      && document.getElementById('trip-result').hidden, null, { timeout: 45_000, polling: 120 });
     assert.deepEqual(errors, []);
-    console.log('Manual browser run completed with zero console errors.');
+    console.log('Served all three stations and retried from Evanger using only keyboard inputs.');
   } finally {
     await browser.close();
   }
 } finally {
-  server.httpServer.close();
+  server?.httpServer.close();
 }

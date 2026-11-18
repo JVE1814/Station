@@ -110,3 +110,9 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - Added controller and brake-pipe lag, separate rain and snow adhesion, forward signal and speed-change previews, live approach advice, boarding dwell and results for each call, a final grade and an interactive keyboard lesson.
 - Passed five new driving tests and all seven existing dynamics, manual driving and service tests. The new cases include a full three-call fixture drive in dry, wet and snowy conditions with no emergency stops, under four metres of stopping error and the existing jerk threshold. TypeScript and lint passed for the driving changes.
 - On the original mapped pair, the dry R40 profile matched the previous automatic replay at 190.50 seconds, 1.91 metres stopping error and 0.550 m/s³ peak jerk. Full-route replay and in-browser keyboard review await the Evanger–Voss bake and interface integration.
+
+## R40 replay and keyboard checks
+
+- Releasing the brake on a falling grade now holds acceleration at zero until the brake pipe releases. The new test checks jerk from measured speed, including the first movement. All 42 tests passed.
+- Ran six full-route diagnostics on the mapped Evanger–Voss rail profile built with Copernicus for the pilot bake. Automatic driving and the displayed advisory notches served all three stops in clear, wet and snowy conditions. Every run reported zero emergency stops, peak jerk of 0.550 m/s³ and errors between 1.55 and 1.98 m. The clear advisory run finished in 1005.79 simulated seconds with grade B, 89/100 and 39 passengers carried.
+- Added a replay verifier for the shipping route files and a Chromium keyboard check that follows the driving guidance, visits all three views, saves the stop cards and retries the run. Both still need to run on the finished scenery build.

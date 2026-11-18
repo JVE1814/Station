@@ -2,7 +2,7 @@ import { BlockController } from './blocks.ts';
 import type { BlockAuthority } from './blocks.ts';
 import { STEP, CabEffort, FixedSimulation, applyAcceleration, railGrip, stepTrain } from './dynamics.ts';
 import type { DriverControls, RailSurface, TrainState } from './dynamics.ts';
-import { PLATFORM_TOLERANCE, brakingGuidance, fareCounts, scoreRun, scoreStop } from './driving.ts';
+import { PLATFORM_TOLERANCE, STOPPED_SPEED, brakingGuidance, fareCounts, scoreRun, scoreStop } from './driving.ts';
 import type { Boarding, DrivingPreview, FinalResult, SpeedPreview, StopResult } from './driving.ts';
 import type { Rail } from './rail';
 import { timetableSeconds } from './world-data.ts';
@@ -139,7 +139,7 @@ export class Service {
   }
 
   get canOpenDoors(): boolean {
-    if (this.state.speed > 0.02) return false;
+    if (this.state.speed > (this.driving ? STOPPED_SPEED : 0.02)) return false;
     if (!this.driving || this.training) return true;
     const previous = this.stops[this.nextIndex - 1];
     const reference = this.chainage();
@@ -185,6 +185,7 @@ export class Service {
 
   adjustNotch(control: 'throttle' | 'brake', increment: number): void {
     this.automatic = false;
+    if (this.driving && this.controls.doorsOpen) return;
     this.controls[control] = Math.max(0, Math.min(1, Math.round((this.controls[control] + increment) * 5) / 5));
   }
 

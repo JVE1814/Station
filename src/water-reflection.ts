@@ -59,6 +59,10 @@ export class WaterReflection {
     this.reflector.rotation.x = -Math.PI / 2;
   }
 
+  invalidate(): void {
+    this.refreshedAt = -Infinity;
+  }
+
   register(mesh: WaterMesh, level: number): () => void {
     mesh.geometry.computeBoundingBox();
     mesh.updateWorldMatrix(true, false);

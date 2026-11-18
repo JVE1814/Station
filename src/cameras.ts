@@ -80,6 +80,10 @@ export class Cameras {
     this.mapLean = mapLean;
   }
 
+  setChaseOrbit(radius: number, polar: number, azimuth: number): void {
+    this.orbit.set(radius, polar, azimuth);
+  }
+
   allowMapExtent(height: number): void {
     this.mapLimit = Math.max(this.mapLimit, height);
   }

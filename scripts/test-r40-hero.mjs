@@ -28,3 +28,19 @@ test('the chase reference camera clears the terrain and cuts without a transitio
   assert.ok(camera.settled);
   assert.ok(camera.camera.position.y >= 16.7);
 });
+
+test('gallery camera poses stay exact when shots share the same scene', () => {
+  const reused = new Cameras();
+  const train = new Group();
+  const eye = new Vector3(0.38, 2.7, -9.33);
+  for (const shot of heroShots(route)) {
+    train.position.set(shot.distance * .2, 27, -shot.distance * .5);
+    const fresh = new Cameras();
+    for (const camera of [fresh, reused]) {
+      frameHero(camera, shot, train.position);
+      camera.update(train, eye, 0, () => 28);
+    }
+    assert.ok(fresh.camera.position.distanceTo(reused.camera.position) < 1e-8, shot.id);
+    assert.ok(fresh.camera.quaternion.angleTo(reused.camera.quaternion) < 1e-7, shot.id);
+  }
+});

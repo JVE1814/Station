@@ -42,11 +42,13 @@ async function run(): Promise<void> {
   if (!network && !pair) throw new Error('The offline service file could not be loaded.');
   const data = network ? { ...network, service: network.ref } : pair!;
   const rail = new Rail(data.rail);
-  const shot = network?.ref === 'R40' && options.has('hero') ? heroShots(network).find(item => item.id === options.get('hero')) : undefined;
+  const gallery = network?.ref === 'R40' && options.has('hero') ? heroShots(network) : [];
+  let shot = gallery.find(item => item.id === options.get('hero'));
   const showpiece = network?.ref === 'R40';
   if (showpiece) element('notice').textContent = 'Loading Evanger–Voss scenery…';
-  const start = shot ? { distance: shot.distance, speed: shot.speed, nextIndex: Math.max(1, data.stations.findIndex(station => station.stopDistance > shot.distance)) } : undefined;
-  let service = new Service(data, rail, { ...start, driving: showpiece });
+  const galleryStart = (selected: (typeof gallery)[number]) => ({ distance: selected.distance, speed: selected.speed,
+    nextIndex: Math.max(1, data.stations.findIndex(station => station.stopDistance > selected.distance)), driving: true });
+  let service = new Service(data, rail, shot ? galleryStart(shot) : { driving: showpiece });
   let traffic = network?.traffic?.length ? new Traffic(data, rail, service, network.traffic) : null;
   const quality = parseQuality(options.get('quality') ?? localStorage.getItem('station-r40-quality'));
   const scene = new Scene();
@@ -300,6 +302,7 @@ async function run(): Promise<void> {
     dirty = true;
     atmosphere.set(night, weather);
     lighting?.set(night, weather);
+    waterReflection?.invalidate();
     service.surface = weather;
     scene.environment = night ? nightReflection : dayReflection;
     scene.environmentIntensity = showpiece ? (night ? .59 : .73) : (night ? .38 : .55);
@@ -441,6 +444,34 @@ async function run(): Promise<void> {
   let nextHud = previous;
   let nextStatus = previous;
   let previousReversals = service.reversals;
+  let preparingCapture = false;
+
+  if (shot) {
+    world.dataset.captureControls = 'ready';
+    window.addEventListener('station-capture', async event => {
+      const request = (event as CustomEvent<{ id: string; look: string }>).detail;
+      const selected = gallery.find(item => item.id === request?.id);
+      if (!selected || preparingCapture || !['golden', 'night', 'snow'].includes(request.look)) return;
+      preparingCapture = true;
+      world.dataset.stage = 'scenery';
+      try {
+        if (selected !== shot) {
+          await activeStream?.ready(selected.distance, 2300);
+          shot = selected;
+          service = new Service(data, rail, galleryStart(selected));
+          frameHero(cameras, selected, rail.position(selected.distance));
+        }
+        night = request.look === 'night';
+        weather = request.look === 'snow' ? 'snow' : 'clear';
+        configureWeather();
+      } catch (error) {
+        world.dataset.stage = 'failed';
+        console.error(error);
+      } finally {
+        preparingCapture = false;
+      }
+    });
+  }
 
   function advance(simulationTime: number): void {
     if (paused) return;
@@ -528,7 +559,7 @@ async function run(): Promise<void> {
     const wallTime = Math.max(0, (now - previous) / 1000);
     const elapsed = Math.min(.1, wallTime);
     previous = now;
-    if (paused && !dirty && !cameras.needsUpdate) {
+    if (preparingCapture || paused && !dirty && !cameras.needsUpdate) {
       requestAnimationFrame(frame);
       return;
     }
@@ -542,9 +573,10 @@ async function run(): Promise<void> {
       previousReversals = service.reversals;
     }
     place(cab.group, chainage);
-    const inTunnel = shot ? data.spans.some(span => span.tunnel && span.start <= shot.distance && span.end > shot.distance) : service.trackSpan.tunnel;
+    const inTunnel = shot ? data.spans.some(span => span.tunnel && span.start <= chainage && span.end > chainage) : service.trackSpan.tunnel;
     const visual = { ...service.controls, speed: state.speed, night: night || inTunnel, deltaSeconds: elapsed, weather };
-    marker?.update(rail, service.nextStop, chainage, !shot && !tutorial);
+    const stopMarker = service.controls.doorsOpen ? service.stops[service.nextIndex - 1] : service.nextStop;
+    marker?.update(rail, stopMarker, chainage, !shot && !tutorial);
     const shoreline = activeStream?.lakesideAt(chainage) ?? lakesideAt(chainage);
     if (!shot && !separateClock) audio.update({ ...service.effort, doorsOpen: service.controls.doorsOpen, brakeCommand: service.controls.brake,
       speed: state.speed, distance: state.distance, weather, tunnel: inTunnel, bridge: service.trackSpan.bridge,

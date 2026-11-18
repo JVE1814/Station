@@ -64,7 +64,7 @@ export class StoppingMarker {
 
   constructor() {
     this.label.center.set(.5, 0);
-    this.label.scale.set(2.35, 1.025, 1);
+    this.label.scale.set(2.55, 1.12, 1);
     this.group.add(this.label);
   }
 
@@ -98,7 +98,7 @@ export class StoppingMarker {
     this.group.position.copy(marker.position);
     this.group.position.x -= marker.tangent.z * 2.35;
     this.group.position.z += marker.tangent.x * 2.35;
-    this.group.position.y += 1.15;
+    this.group.position.y += 1.45;
     this.group.updateMatrixWorld();
   }
 }

@@ -28,25 +28,21 @@ try {
   page.on('console', entry => { if (entry.type() === 'error') { errors.push(entry.text()); console.error(entry.text()); } });
   await mkdir(output, {recursive:true});
   const cdp = await page.context().newCDPSession(page);
+  let reusable = false;
   for (const shot of shots) {
     const looks = !baseline && !goldenOnly && ['01-lakeside-chase','06-bulken-cab','07-lake-overlook'].includes(shot.id)
       ? ['golden','night','snow'] : ['golden'];
-    let previousLook;
     for (const look of looks) {
       if (chosenLook && look !== chosenLook) continue;
       const name = resolve(output, `${shot.id}-${look}-${stage}.png`);
       if (skipExisting && await access(name).then(() => true, () => false)) continue;
       let previousFrame;
-      if (previousLook) {
-        previousFrame = await page.evaluate(({ previousLook, look }) => {
+      if (reusable) {
+        previousFrame = await page.evaluate(detail => {
           const frame = document.getElementById('world').dataset.captureFrame;
-          if ((previousLook === 'night') !== (look === 'night')) document.getElementById('day').click();
-          if (look === 'snow') {
-            document.getElementById('weather').click();
-            document.getElementById('weather').click();
-          }
+          window.dispatchEvent(new CustomEvent('station-capture', {detail}));
           return frame;
-        }, { previousLook, look });
+        }, { id: shot.id, look });
       } else {
         const url = new URL(server.resolvedUrls.local[0]);
         url.search = new URLSearchParams({line:'R40',hero:shot.id,look,quality:'ultra'}).toString();
@@ -63,9 +59,11 @@ try {
       assert.deepEqual(errors, []);
       const { data } = await cdp.send('Page.captureScreenshot', {format:'png', fromSurface:true});
       await writeFile(name, Buffer.from(data,'base64'));
-      console.log(name, shot.distance.toFixed(1), await page.locator('#world').evaluate(node => [node.dataset.drawCalls,node.dataset.triangles]));
+      const info = await page.locator('#world').evaluate(node => ({...node.dataset}));
+      assert.ok(Math.abs(Number(info.chainage) - shot.distance) < .02);
+      console.log(name, shot.distance.toFixed(1), [info.drawCalls, info.triangles]);
       assert.deepEqual(errors.splice(0), []);
-      previousLook = await page.locator('#world').getAttribute('data-capture-frame') ? look : undefined;
+      reusable = info.captureControls === 'ready';
     }
   }
 } finally {

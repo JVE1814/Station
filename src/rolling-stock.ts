@@ -583,7 +583,7 @@ function headlampGlow() {
 }
 
 function trainHeadlight(body: Group, showpiece = false) {
-  const light = new SpotLight(0xffe5c4, showpiece ? 520 : 380, 125, 0.21, 0.68, 1.25);
+  const light = new SpotLight(0xffe5c4, showpiece ? 350 : 380, 125, 0.21, 0.68, 1.25);
   light.position.set(0, 1.64, -12.15);
   light.target.position.set(0, 0.70, -52);
   light.visible = false;
@@ -955,6 +955,15 @@ function wetWindscreen(group: Group, trim: MeshStandardMaterial) {
     color: 0xa5bcc7, metalness: .12, roughness: .13, clearcoat: .92, clearcoatRoughness: .11,
     envMapIntensity: 1.12, transparent: true, opacity: .037, depthWrite: false,
   });
+  glazing.onBeforeCompile = shader => {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_end>', `
+      #include <lights_fragment_end>
+      reflectedLight.directSpecular *= .06;
+      #ifdef USE_CLEARCOAT
+        clearcoatSpecularDirect *= .05;
+      #endif
+    `);
+  };
   const glass = new Mesh(geometry, glazing);
   glass.name = 'Cab windscreen glazing';
   glass.renderOrder = 11;

@@ -1,4 +1,4 @@
-import { Spherical, Vector3 } from 'three';
+import type { Vector3 } from 'three';
 import type { Cameras, View } from './cameras';
 import type { NetworkRoute } from './network';
 
@@ -35,13 +35,7 @@ export function heroShots(route: NetworkRoute): Shot[] {
 
 export function frameHero(cameras: Cameras, shot: Shot, train: Vector3): void {
   cameras.select(shot.view);
-  if (shot.orbit) {
-    const [radius, phi, theta] = shot.orbit;
-    // The camera API's drag and zoom use the same spherical coordinates as normal play.
-    const orbit = new Spherical(24, 1.4, 2.48);
-    cameras.drag((orbit.theta - theta) / .006, (orbit.phi - phi) / .006);
-    cameras.zoom(Math.log(radius / orbit.radius) * 1000);
-  }
+  if (shot.orbit) cameras.setChaseOrbit(...shot.orbit);
   if (shot.height) cameras.fitMap(train, train, shot.height, true);
   cameras.cut(shot.lift, shot.mapLean);
 }

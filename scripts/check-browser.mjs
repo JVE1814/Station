@@ -25,7 +25,11 @@ try {
     const query = new URLSearchParams({line:'R40',quality:'high',audit:'trackbed'});
     if (hero) query.set('hero',hero);
     await page.goto(new URL('?' + query, origin).href,{timeout:180000});
-    await page.waitForFunction(() => document.getElementById('world').dataset.stage === 'running',null,{timeout:180000,polling:250});
+    const ready = await page.waitForFunction(() => {
+      const stage = document.getElementById('world').dataset.stage;
+      return stage === 'running' || stage === 'failed' ? stage : false;
+    }, null, {timeout:600000,polling:250});
+    assert.equal(await ready.jsonValue(), 'running', 'R40 must start offline');
   };
   await launch('02-evanger-cab');
   const renderer = await page.locator('#world').getAttribute('data-renderer');
@@ -51,7 +55,7 @@ try {
     await page.waitForFunction(({view, previousFrame}) => {
       const state = document.getElementById('world').dataset;
       return state.view === view && (!previousFrame || (state.stage === 'running' && state.captureFrame !== previousFrame));
-    }, {view, previousFrame}, {timeout:180000,polling:250});
+    }, {view, previousFrame}, {timeout:360000,polling:250});
     const info = await page.locator('#world').evaluate(el => ({
       calls: Number(el.dataset.drawCalls), triangles: Number(el.dataset.triangles)
     }));

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { gunzipSync } from 'node:zlib';
+import { Mesh } from 'three';
+import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';
 import { createCanvas } from '@napi-rs/canvas';
 import { Rail } from '../src/rail.ts';
 import { auditTrackbed, auditVehicleClearance, createScenery } from '../src/scenery.ts';
@@ -11,9 +14,16 @@ globalThis.document = {
     return createCanvas(1, 1);
   },
 };
-const data = JSON.parse(await readFile('public/data/service.json', 'utf8'));
+const source = process.argv[2] ?? 'public/data/service.json';
+const bytes = await readFile(source);
+const data = JSON.parse(source.endsWith('.gz') ? gunzipSync(bytes) : bytes);
 const rail = new Rail(data.rail);
 const scenery = createScenery(data, rail);
+scenery.group.traverse(object => {
+  if (!(object instanceof Mesh) || object.isInstancedMesh || !object.geometry.index) return;
+  object.geometry.boundsTree ??= new MeshBVH(object.geometry, { indirect: true });
+  object.raycast = acceleratedRaycast;
+});
 const bed = auditTrackbed(scenery.group, rail, data);
 const body = auditVehicleClearance(scenery.group, rail);
 console.log(`Trackbed: ${bed.sampleCount} samples, ${bed.maxGap.toFixed(3)} m maximum gap, ${bed.missingCount} missing.`);

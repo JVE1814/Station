@@ -17,6 +17,16 @@ try {
   try {
     const page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
     const errors = [];
+    const foreign = [];
+    const origin = new URL(server.resolvedUrls.local[0]).origin;
+    await page.route('**/*', request => {
+      const target = new URL(request.request().url());
+      if (target.origin === origin || target.protocol === 'data:' || target.protocol === 'blob:') {
+        return request.continue();
+      }
+      foreign.push(target.href);
+      return request.abort('internetdisconnected');
+    });
     page.on('pageerror', error => {
       errors.push(error.message);
       console.error(error.message);
@@ -32,7 +42,7 @@ try {
       new PerformanceObserver(list => {
         for (const entry of list.getEntries()) {
           if (entry.name === 'station-frame' && window.frameCosts.length < 10000) {
-            window.frameCosts.push({ time: entry.startTime, cpu: entry.duration });
+            window.frameCosts.push({ time: entry.detail ?? entry.startTime, cpu: entry.duration });
           }
         }
       }).observe({ entryTypes: ['measure'] });
@@ -99,7 +109,8 @@ try {
       }
     }
 
-    console.log(`Browser console errors: ${errors.length}`);
+    console.log(`Browser console errors: ${errors.length}; external requests: ${foreign.length}.`);
+    assert.deepEqual(foreign, [], 'The offline build made a request outside the static server');
     assert.ok(bed.sampleCount > 0 && bed.missingCount === 0, 'Trackbed terrain check has missing intersections');
     assert.ok(bed.maxGap <= 0.5, `Trackbed terrain gap ${bed.maxGap} m exceeds 0.5 m`);
     if (errors.length) throw new Error(errors.join('\n'));

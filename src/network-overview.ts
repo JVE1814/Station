@@ -5,7 +5,13 @@ import {
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
-import type { NetworkRoute } from './network';
+import type { LocalPoint } from './world-data';
+
+export interface OverviewRoute {
+  ref: string;
+  rail: { east: number; north: number }[];
+  stations: { osmId: number; name: string; position: LocalPoint }[];
+}
 
 const routeColors: Record<string, number> = { F4: 0xdf9c67, F5: 0x72b1bf, F6: 0x8db575 };
 
@@ -44,8 +50,18 @@ export class NetworkOverview {
   private readonly stations: StationLabel[] = [];
   private readonly lines: LineMaterial[] = [];
   private readonly dots: PointsMaterial;
+  private readonly trains = new BufferGeometry();
+  private readonly trainLocations = new Float32BufferAttribute(new Float32Array(36), 3);
+  private readonly trainDots = new PointsMaterial({
+    color: 0xffcc76,
+    size: 8,
+    sizeAttenuation: false,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
 
-  constructor(routes: readonly NetworkRoute[]) {
+  constructor(routes: readonly OverviewRoute[], stride = 5) {
     this.group.name = 'Mapped intercity rail network';
     const minimum = new Vector3(Infinity, 0, Infinity);
     const maximum = new Vector3(-Infinity, 0, -Infinity);
@@ -54,7 +70,7 @@ export class NetworkOverview {
     for (const route of routes) {
       const positions: number[] = [];
       route.rail.forEach((point, index) => {
-        if (index % 5 && index !== route.rail.length - 1) return;
+        if (index % stride && index !== route.rail.length - 1) return;
         positions.push(point.east, 20, -point.north);
         minimum.x = Math.min(minimum.x, point.east);
         minimum.z = Math.min(minimum.z, -point.north);
@@ -107,17 +123,29 @@ export class NetworkOverview {
     const points = new Points(geometry, this.dots);
     points.renderOrder = 31;
     this.group.add(points);
+    this.trains.setAttribute('position', this.trainLocations);
+    const active = new Points(this.trains, this.trainDots);
+    active.renderOrder = 32;
+    active.frustumCulled = false;
+    this.group.add(active);
     this.stations = [...labels.values()];
     this.center.copy(minimum).lerp(maximum, 0.5);
     this.fitHeight = Math.max((maximum.z - minimum.z) * 1.12, (maximum.x - minimum.x) * 0.75);
     this.group.visible = false;
   }
 
-  update(map: boolean, height: number, camera: Vector3): void {
+  update(map: boolean, height: number, camera: Vector3, trains: Vector3[]): void {
     const opacity = map ? Math.max(0, Math.min(1, (height - 1800) / 2100)) : 0;
     this.group.visible = opacity > 0;
     if (!this.group.visible) return;
     this.dots.opacity = opacity;
+    this.trainDots.opacity = opacity;
+    const count = Math.min(this.trainLocations.count, trains.length);
+    for (let index = 0; index < count; index++) {
+      this.trainLocations.setXYZ(index, trains[index].x, 24, trains[index].z);
+    }
+    this.trainLocations.needsUpdate = true;
+    this.trains.setDrawRange(0, count);
     for (const line of this.lines) line.opacity = opacity;
     for (const item of this.stations) {
       const scale = height * 0.027;

@@ -6,6 +6,10 @@ import shutil
 import subprocess
 import sys
 
+from bake_network_tiles import write_json as write_bake
+from pyproj import Transformer
+from shapely import LineString
+
 from source_data import CACHE
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +33,20 @@ def publish(staged):
     write_json(output / "timetables.json", calls)
     write_json(output / "network.json", network)
     pair = json.loads((output / "service.json").read_text())
+    transform = Transformer.from_crs(network["projection"], pair["projection"], always_xy=True)
+    outline = []
+    for service in network["services"]:
+        x, y = transform.transform([point["east"] for point in service["rail"]],
+                                   [point["north"] for point in service["rail"]])
+        coordinates = LineString(zip(x, y)).simplify(3.0, preserve_topology=False).coords
+        outline.append({
+            "ref": service["ref"],
+            "rail": [{"east": round(east, 3), "north": round(north, 3)} for east, north in coordinates],
+            "stations": [{"osmId": station["osmId"], "name": station["name"],
+                          "position": transform.transform(*station["position"])}
+                         for station in service["stations"]],
+        })
+    write_bake(output / "overview-r40.json.gz", outline, compress=True)
     catalog = [
         {
             "ref": service.get("ref", service.get("service")),

@@ -15,6 +15,7 @@ export interface RailPose {
 
 export class Rail {
   private readonly points: readonly RailPoint[];
+  private readonly tangent: Float32Array;
 
   constructor(points: readonly RailPoint[]) {
     this.points = points;
@@ -24,13 +25,21 @@ export class Rail {
     ) {
       throw new Error('A rail alignment requires two or more strictly ordered points');
     }
+    this.tangent = new Float32Array(points.length * 2);
+    points.forEach((_, index) => {
+      const left = points[Math.max(0, index - 1)];
+      const right = points[Math.min(points.length - 1, index + 1)];
+      const length = right.distance - left.distance;
+      this.tangent[index * 2] = (right.east - left.east) / length;
+      this.tangent[index * 2 + 1] = (right.north - left.north) / length;
+    });
   }
 
   get length(): number {
     return this.points[this.points.length - 1].distance;
   }
 
-  position(distance: number, target = new Vector3()): Vector3 {
+  private segment(distance: number): number {
     let low = 0;
     let high = this.points.length - 1;
     while (high - low > 1) {
@@ -38,14 +47,33 @@ export class Rail {
       if (this.points[middle].distance < distance) low = middle;
       else high = middle;
     }
+    return low;
+  }
 
+  position(distance: number, target = new Vector3()): Vector3 {
+    const low = this.segment(distance);
+    const high = low + 1;
     const start = this.points[low];
     const end = this.points[high];
-    const fraction = Math.max(0, Math.min(1, (distance - start.distance) / (end.distance - start.distance)));
+    const span = end.distance - start.distance;
+    const t = Math.max(0, Math.min(1, (distance - start.distance) / span));
+    const linearEast = start.east + (end.east - start.east) * t;
+    const linearNorth = start.north + (end.north - start.north) * t;
+    const enter = span * t * (1 - t) ** 2;
+    const leave = -span * t * t * (1 - t);
+    const blend = t * t * (3 - 2 * t);
+    const easedEast = start.east + (end.east - start.east) * blend
+      + enter * this.tangent[low * 2] + leave * this.tangent[high * 2];
+    const easedNorth = start.north + (end.north - start.north) * blend
+      + enter * this.tangent[low * 2 + 1] + leave * this.tangent[high * 2 + 1];
+    const driftEast = easedEast - linearEast;
+    const driftNorth = easedNorth - linearNorth;
+    const drift = Math.hypot(driftEast, driftNorth);
+    const blendLimit = drift > 0.35 ? 0.35 / drift : 1;
     return target.set(
-      start.east + (end.east - start.east) * fraction,
-      start.height + (end.height - start.height) * fraction,
-      -(start.north + (end.north - start.north) * fraction),
+      linearEast + blendLimit * driftEast,
+      start.height + (end.height - start.height) * t,
+      -(linearNorth + blendLimit * driftNorth),
     );
   }
 
@@ -64,10 +92,16 @@ export class Rail {
   }
 
   gradient(distance: number): number {
-    const start = this.position(distance - 2);
-    const end = this.position(distance + 2);
-    const horizontal = Math.hypot(end.x - start.x, end.z - start.z);
-    return horizontal === 0 ? 0 : (end.y - start.y) / horizontal;
+    const from = Math.max(this.points[0].distance, distance - 2);
+    const to = Math.min(this.length, distance + 2);
+    if (from >= to) return 0;
+    const height = (chainage: number) => {
+      const index = this.segment(chainage);
+      const a = this.points[index];
+      const b = this.points[index + 1];
+      return a.height + (b.height - a.height) * (chainage - a.distance) / (b.distance - a.distance);
+    };
+    return (height(to) - height(from)) / (to - from);
   }
 
   pose(distance: number, tangentSpan = 3): RailPose {

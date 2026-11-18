@@ -1,6 +1,8 @@
 # Station
 
-Station is a desktop browser train simulator. The current service is R40 between Seimsgrend and Bulken on the Bergen corridor. The 18 November 2026 timetable starts at 08:08 and calls at Bulken at 08:11.
+Station is a desktop browser train simulator. The service picker offers the full F4 to Bergen, F5 to Stavanger, F6 to Trondheim and the shorter R40 Seimsgrend–Bulken service. R40 is the default service and starts at 08:08 on the 18 November 2026 timetable.
+
+In Bird’s-eye view, **Fit network** shows all three intercity routes. Use the mouse wheel to zoom and drag to pan. **Follow train** returns the map to the running service.
 
 ## Run
 
@@ -39,9 +41,9 @@ Start by releasing the brakes with Q, then apply power with W. Watch the speed l
 ## Architecture
 
 - The Python baker resolves connected rail ways and stop positions from OSM service relations, projects them to a local metric grid, and derives a vertical profile from Copernicus DEM.
-- The browser loads the baked service, station, rail, terrain and feature data. Three.js renders rail infrastructure and scenery on a tessellated terrain grid. Rolling stock and cab instruments are built in code.
+- The browser keeps the active alignment and timetable in memory and streams nearby gzip scenery tiles. The tile bounds share one metric projection and the visible terrain has a single owner where tiles overlap. Three.js renders the infrastructure, scenery, original rolling stock and cab instruments.
 - Longitudinal dynamics run at 120 Hz and interpolate the pose at render time. The train samples the alignment separately at each bogie. Cab, chase and bird’s-eye cameras share the same train state.
-- The timetable is extracted from Entur GTFS. The baked world contains the OSM identifiers and raw source geometry used by the geographic checks.
+- The timetable is extracted from Entur GTFS. Same-direction scheduled trains share block occupancy with the player. F5 changes driving ends at Kristiansand. The baked world contains the original OSM identifiers and rail geometry used by the geographic checks.
 
 ## Rebuild data and verify
 
@@ -52,6 +54,6 @@ python -m pip install -r scripts/requirements.txt
 npm run data
 ```
 
-Run all automated checks with `npm run verify` or the station-pair checks with `npm run verify:pair`. The verification runner reports each check separately. The browser check expects Chromium at `/usr/bin/chromium`; set `CHROMIUM_PATH` for a different installation. `npm run verify:browser -- --captures` writes 1080p captures to `evidence/`.
+Run all automated checks with `npm run verify` or the station-pair checks with `npm run verify:pair`. The full run audits 169 scenery tiles and exercises accelerated service replays before browser verification. The verification runner reports each check separately. The browser check expects Chromium at `/usr/bin/chromium`; set `CHROMIUM_PATH` for a different installation. `npm run verify:browser -- --captures` writes 1080p captures to `evidence/`.
 
 The playable checkpoint and its side-by-side screenshots are indexed in [evidence](evidence/README.md). See [PROGRESS.md](PROGRESS.md) for review status and [ASSETS.md](ASSETS.md) for attribution.

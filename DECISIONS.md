@@ -12,3 +12,5 @@
 - Count passenger stations along the selected open physical alignment. Nearby platforms on separate routes enter the inventory only when mapped passenger-service membership connects them to the alignment. Keep all mapped stations separate from the calls on each dated service.
 - Interpret OSM signal nodes on a railway way as chainage references. Place the pole beside the nearest track with clearance from adjacent tracks, while retaining the mapped signal node and direction in data.
 - Use dated same-direction Entur journeys for moving traffic on the main route. Treat repeated use of an OSM way in the Kristiansand reversal as one physical block lock.
+- Preserve mapped building footprints when an inferred roof overlaps the railway. Use an operational passage 7.2 m wide and 6.7 m high where needed, respect mapped minimum heights and leave canopy sides open.
+- Use a cubic plan spline bounded to 0.35 m from the source polyline between samples. Compute longitudinal grades from the fitted height profile over its distance along the track.

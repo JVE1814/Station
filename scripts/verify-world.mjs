@@ -22,11 +22,13 @@ function segmentDistance(east, north, start, end) {
   const t = squared === 0 ? 0 : Math.max(0, Math.min(1, (dx * x + dy * y) / squared));
   return Math.hypot(dx - t * x, dy - t * y);
 }
+const rail = new Rail(world.rail);
 let trackError = 0;
-for (const point of world.rail) {
+for (let distance = 0; distance <= rail.length; distance += 2) {
+  const point = rail.position(distance);
   let minimum = Infinity;
   for (let segment = 1; segment < points.length; segment++) {
-    minimum = Math.min(minimum, segmentDistance(point.east, point.north, points[segment - 1], points[segment]));
+    minimum = Math.min(minimum, segmentDistance(point.x, -point.z, points[segment - 1], points[segment]));
   }
   trackError = Math.max(trackError, minimum);
 }
@@ -35,7 +37,6 @@ assert.ok(trackError <= 5, `Track error ${trackError} m exceeds 5 m`);
 console.log(`${world.stations.length} OSM station names match. Maximum displacement ${stationError.toFixed(3)} m.`);
 console.log(`Maximum horizontal rail displacement ${trackError.toFixed(3)} m.`);
 
-const rail = new Rail(world.rail);
 const service = new Service(world, rail);
 service.automatic = true;
 let previous = service.state;

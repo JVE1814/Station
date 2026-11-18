@@ -26,3 +26,10 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - The browser performance run reported SwiftShader and timed out before it collected a moving-train timing sample. Hardware GPU performance remains unverified. The revised timing harness keeps the same p95 limits and sample count.
 - Resolved source topology for F4, F5 and F6 with 48, 54 and 34 passenger station entries. Preserved the six mapped open F6 ways around a construction segment and the source track reversal at Kristiansand. Selected dated Entur departures have 21 F4 calls, 28 F5 calls and 20 F6 calls including departure.
 - The first full scenery slicing attempt exceeded the executor memory limit. The current bake indexes the reduced OSM corridor once and shares geographic features across tile windows. A real three-tile R40 probe already passed rail seam and geographic checks.
+
+## Baked intercity network
+
+- Installed 169 byte-stable gzip scenery tiles and the real-axis network overview for F4, F5 and F6. The data bundle includes the original source ways and 136 source-matched station entries across the three alignments.
+- Added the offline service picker and a full network fit in Bird’s-eye view. Nearby track, terrain and mapped features stream around the train or the close map focus.
+- The first five F4 meshes passed after a source-footprint clearance fix. Across 9,669 trackbed observations, the maximum gap was 0.282 m with no missing intersections. There were zero intersections in 333,675 coach-envelope observations. The larger geometry audit is running.
+- The nine R40 1080p comparisons and a brighter night refresh are committed under `evidence/`. The Chromium keyboard run departed Seimsgrend and switched to all three cameras. Its arrival is pending.

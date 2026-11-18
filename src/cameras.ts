@@ -14,6 +14,7 @@ export class Cameras {
   private readonly target = new Vector3();
   private readonly offset = new Vector3();
   private readonly rotation = new Euler(0, 0, 0, 'YXZ');
+  private mapGround: number | undefined;
   private readonly orbit = new Spherical(30, 1.18, 2.35);
   private readonly mapOffset = new Vector3(0, 530, 0);
   private mapLimit = 14000;
@@ -53,6 +54,10 @@ export class Cameras {
     return this.mapOffset.y;
   }
 
+  get mapFocus(): Vector3 | undefined {
+    return this.view === 'map' && this.mapOffset.y <= 2200 ? this.target : undefined;
+  }
+
   drag(x: number, y: number): void {
     if (this.view === 'cab') {
       this.cabYaw = MathUtils.clamp(this.cabYaw - x * 0.003, -1.05, 1.05);
@@ -74,7 +79,7 @@ export class Cameras {
     }
   }
 
-  update(cab: Group, eye: Vector3, elapsed: number): void {
+  update(cab: Group, eye: Vector3, elapsed: number, groundAt?: (x: number, z: number) => number | undefined): void {
     if (this.view === 'cab') {
       this.destination.copy(eye).applyQuaternion(cab.quaternion).add(cab.position);
       this.rotation.set(this.cabPitch, this.cabYaw, 0);
@@ -87,6 +92,10 @@ export class Cameras {
       this.target.copy(cab.position);
       this.target.x += this.mapOffset.x;
       this.target.z += this.mapOffset.z;
+      const elevation = groundAt?.(this.target.x, this.target.z) ?? this.target.y;
+      this.mapGround ??= this.target.y;
+      this.mapGround += (elevation - this.mapGround) * (1 - Math.exp(-elapsed * 8));
+      this.target.y = this.mapGround;
       this.destination.copy(this.target);
       this.destination.y += this.mapOffset.y;
       this.destination.z += this.mapOffset.y * 0.22;

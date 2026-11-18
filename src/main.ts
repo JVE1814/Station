@@ -7,6 +7,7 @@ import { Cameras } from './cameras';
 import type { View } from './cameras';
 import { loadNetworkRoute, readWorldAsset } from './network';
 import { NetworkOverview } from './network-overview';
+import type { OverviewRoute } from './network-overview';
 import routeCatalog from '../data/route-catalog.json';
 import { Rail } from './rail';
 import { createCab, createTrain } from './rolling-stock';
@@ -14,7 +15,7 @@ import { auditTrackbed, createScenery } from './scenery';
 import { Service } from './service';
 import { SceneryStream } from './streaming';
 import { Traffic } from './traffic';
-import { timetableSeconds } from './world-data';
+import { groundHeight, timetableSeconds } from './world-data';
 import type { WorldData } from './world-data';
 import './style.css';
 
@@ -69,6 +70,8 @@ async function run(): Promise<void> {
     console.error(error);
   });
   if (scenery instanceof SceneryStream) await scenery.ready(data.stations[0].stopDistance);
+  const heightAt = scenery instanceof SceneryStream ? (x: number, z: number) => scenery.heightAt(x, z)
+    : (x: number, z: number) => groundHeight(pair!.terrain, x, -z);
   scene.add(scenery.group);
   const audit = options.get('audit') === 'trackbed';
   if (audit) {
@@ -81,7 +84,10 @@ async function run(): Promise<void> {
   world.dataset.stage = 'rolling-stock';
   const atmosphere = new Atmosphere(scene);
   const cameras = new Cameras();
-  const overview = networkData ? new NetworkOverview(networkData.routes) : null;
+  const outline = !networkData && routeCatalog.length > 1
+    ? await readWorldAsset<OverviewRoute[]>('data/overview-r40.json.gz') : null;
+  const overview = networkData ? new NetworkOverview(networkData.routes)
+    : outline ? new NetworkOverview(outline, 1) : null;
   if (overview) {
     scene.add(overview.group);
     cameras.allowMapExtent(overview.fitHeight * 1.35);
@@ -326,12 +332,17 @@ async function run(): Promise<void> {
         if (!visible.has(id)) consist.forEach(coach => { coach.group.visible = false; });
       }
     }
-    cameras.update(cab.group, cab.eye, elapsed);
-    overview?.update(cameras.view === 'map', Math.max(0, cameras.camera.position.y - cab.group.position.y), cameras.camera.position);
+    cameras.update(cab.group, cab.eye, elapsed, heightAt);
+    if (overview) {
+      const height = Math.max(0, cameras.camera.position.y - cab.group.position.y);
+      const shown = cameras.view === 'map' && height > 1800;
+      const markers = shown ? [cab.group.position, ...(traffic?.active.map(movement => rail.position(movement.chainage())) ?? [])] : [];
+      overview.update(shown, height, cameras.camera.position, markers);
+    }
     const visualTime = paused ? 0 : elapsed;
     atmosphere.update(cab.group.position, cameras.camera.position, visualTime,
       inTunnel && cameras.view === 'cab');
-    scenery.update(visualTime, cameras.camera.position, chainage);
+    scenery.update(visualTime, cameras.camera.position, chainage, cameras.mapFocus);
     renderer.render(scene, cameras.camera);
     if (now >= nextHud || paused) {
       world.dataset.stage = 'running';
@@ -379,7 +390,7 @@ async function run(): Promise<void> {
       nextHud = now + 100;
     }
     if (audit && !paused) {
-      performance.measure('station-frame', { start: frameStart, end: performance.now() });
+      performance.measure('station-frame', { start: frameStart, end: performance.now(), detail: now });
       performance.clearMeasures('station-frame');
     }
     requestAnimationFrame(frame);

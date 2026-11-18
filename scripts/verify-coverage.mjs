@@ -51,12 +51,14 @@ async function verifyGeography(route) {
       `Source path step does not follow consecutive OSM nodes ${from.node} and ${to.node}`);
   }
 
+  const rail = new Rail(route.rail);
   let sourceIndex = 0;
   let maxTrackError = 0;
-  for (const sample of route.rail) {
-    while (sourceIndex + 2 < sourcePath.length && sourcePath[sourceIndex + 1].distance < sample.distance) sourceIndex++;
+  for (let distance = 0; distance <= rail.length; distance += 2) {
+    const point = rail.position(distance);
+    while (sourceIndex + 2 < sourcePath.length && sourcePath[sourceIndex + 1].distance < distance) sourceIndex++;
     maxTrackError = Math.max(maxTrackError,
-      segmentDistance(sample.east, sample.north, vertices[sourceIndex], vertices[sourceIndex + 1]));
+      segmentDistance(point.x, -point.z, vertices[sourceIndex], vertices[sourceIndex + 1]));
   }
   let maxStationError = 0;
   for (const station of route.stations) {

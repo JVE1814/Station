@@ -1,4 +1,5 @@
 import {
+  Box3,
   BoxGeometry,
   BufferGeometry,
   CanvasTexture,
@@ -47,6 +48,8 @@ const UP = new Vector3(0, 1, 0);
 const X = new Vector3(1, 0, 0);
 const LINE_WIDTH = 3.7;
 const RAIL_OFFSET = (1.435 + 0.074) / 2;
+const STRUCTURE_CLEARANCE_WIDTH = 3.6;
+const STRUCTURE_CLEARANCE_HEIGHT = 6.7;
 
 function smoothstep(value: number) {
   const amount = Math.max(0, Math.min(1, value));
@@ -191,7 +194,7 @@ function routeIndex(rail: Rail, spans: TrackSpan[]) {
       }
     }
   }
-  return (x: number, z: number): Nearest | undefined => {
+  const nearestAt = (x: number, z: number): Nearest | undefined => {
     let nearest: Nearest | undefined;
     for (const { from, to, start, end, span, tunnel } of cells.get(`${Math.floor(x / step)}:${Math.floor(z / step)}`) ?? []) {
       const dx = to.x - from.x;
@@ -208,6 +211,48 @@ function routeIndex(rail: Rail, spans: TrackSpan[]) {
     }
     return nearest;
   };
+  const footprintRailHeights = (outline: LocalPoint[]) => {
+    const margin = STRUCTURE_CLEARANCE_WIDTH;
+    const east = outline.map(point => point[0]);
+    const z = outline.map(point => -point[1]);
+    const left = Math.min(...east) - margin;
+    const right = Math.max(...east) + margin;
+    const top = Math.min(...z) - margin;
+    const bottom = Math.max(...z) + margin;
+    const candidates = new Set<Segment>();
+    for (let x = Math.floor(left / step); x <= Math.floor(right / step); x++) {
+      for (let y = Math.floor(top / step); y <= Math.floor(bottom / step); y++) {
+        for (const item of cells.get(`${x}:${y}`) ?? []) candidates.add(item);
+      }
+    }
+    let low = Infinity;
+    let high = -Infinity;
+    for (const { from, to } of candidates) {
+      for (const blend of [0, 0.25, 0.5, 0.75, 1]) {
+        const x = from.x + (to.x - from.x) * blend;
+        const z = from.z + (to.z - from.z) * blend;
+        if (x < left || x > right || z < top || z > bottom) continue;
+        if (!inside([x, -z], outline) && !nearBoundary(x, -z, outline, margin)) continue;
+        const y = from.y + (to.y - from.y) * blend;
+        low = Math.min(low, y);
+        high = Math.max(high, y);
+      }
+    }
+    return Number.isFinite(low) ? { low, high } : undefined;
+  };
+  return Object.assign(nearestAt, { footprintRailHeights });
+}
+
+function nearBoundary(x: number, y: number, outline: LocalPoint[], margin: number) {
+  const limit = margin * margin;
+  return outline.some(([a, b], index) => {
+    const [c, d] = outline[(index + 1) % outline.length];
+    const dx = c - a;
+    const dy = d - b;
+    const length = dx * dx + dy * dy;
+    const fraction = length === 0 ? 0 : Math.max(0, Math.min(1, ((x - a) * dx + (y - b) * dy) / length));
+    return (a + dx * fraction - x) ** 2 + (b + dy * fraction - y) ** 2 <= limit;
+  });
 }
 
 function forestCover(data: WorldData) {
@@ -270,7 +315,7 @@ function createTerrain(
   const spruceShade = new Color(0x5e7755);
   const cover = forestCover(data);
   const soil = new Color();
-  const fine = 4;
+  const fine = Math.max(4, Math.ceil(spacing / 3));
   const columns = width - 1;
   const rows = height - 1;
   const densities = new Uint8Array(columns * rows).fill(1);
@@ -298,7 +343,7 @@ function createTerrain(
       const vertex = (col: number, row: number, x: number, y: number, resolution: number) => {
         const column = col + x / resolution;
         const line = row + y / resolution;
-        const key = line * fine * (columns * fine + 1) + column * fine;
+        const key = Math.round(line * fine) * (columns * fine + 1) + Math.round(column * fine);
         const existing = cached.get(key);
         if (existing !== undefined) return existing;
         const worldX = east + column * spacing;
@@ -405,6 +450,18 @@ function crossSection(
     }
   }
   return mesh(vertices, indices, surface, undefined, uv);
+}
+
+function spatialBatches<T>(values: readonly T[], size: number, point: (value: T) => [number, number]): T[][] {
+  const groups = new Map<string, T[]>();
+  for (const value of values) {
+    const [x, z] = point(value);
+    const key = `${Math.floor(x / size)}:${Math.floor(z / size)}`;
+    const batch = groups.get(key);
+    if (batch) batch.push(value);
+    else groups.set(key, [value]);
+  }
+  return [...groups.values()];
 }
 
 function addTrack(
@@ -596,15 +653,27 @@ function addTrack(
     }
   }
 
+  const limited: { mesh: InstancedMesh; radius: number }[] = [];
   for (const [surface, entries] of [
     [sleeper, ties], [clips, fasteners], [support, posts], [wire, conductors],
     [insulator, porcelain], [concrete, piers], [steel, bridgeDetail],
   ] satisfies [MeshStandardMaterial, Transform[]][]) {
-    if (!entries.length) continue;
-    const detail = aggregate(box, surface, entries);
-    detail.castShadow = entries !== fasteners && entries !== conductors;
-    group.add(detail);
+    const batches = spatialBatches(entries, 360, entry => [entry.position.x, entry.position.z]);
+    for (const batch of batches) {
+      const detail = aggregate(box, surface, batch);
+      detail.castShadow = entries !== fasteners && entries !== conductors;
+      if (entries === ties || entries === fasteners) {
+        limited.push({ mesh: detail, radius: entries === ties ? 520 : 220 });
+      }
+      group.add(detail);
+    }
   }
+  return (camera: Vector3) => {
+    for (const { mesh: item, radius } of limited) {
+      const sphere = item.boundingSphere;
+      if (sphere) item.visible = camera.distanceToSquared(sphere.center) < (sphere.radius + radius) ** 2;
+    }
+  };
 }
 
 function addParallelTracks(
@@ -743,8 +812,50 @@ function appendWall(
   batches.wallIndices.push(index, index + 1, index + 2, index + 1, index + 3, index + 2);
 }
 
-function appendRoof(batches: BuildingBatches, points: LocalPoint[], height: number, rise: number) {
+function appendRailClearWall(
+  batches: BuildingBatches,
+  a: LocalPoint,
+  b: LocalPoint,
+  base: number,
+  height: number,
+  color: Color,
+  nearby: ReturnType<typeof routeIndex>,
+): void {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const length = Math.hypot(dx, dy);
+  const steps = Math.max(1, Math.ceil(length / 1.2));
+  const lowerEdge = (fraction: number) => {
+    const near = nearby(a[0] + dx * fraction, -(a[1] + dy * fraction));
+    if (!near || near.distance > STRUCTURE_CLEARANCE_WIDTH || base > near.height + STRUCTURE_CLEARANCE_HEIGHT) return base;
+    return Math.min(height, Math.max(base, near.height + STRUCTURE_CLEARANCE_HEIGHT));
+  };
+  for (let step = 0; step < steps; step++) {
+    const from = step / steps;
+    const to = (step + 1) / steps;
+    const bottom = Math.max(lowerEdge(from), lowerEdge((from + to) * 0.5), lowerEdge(to));
+    if (bottom >= height) continue;
+    appendWall(batches, [a[0] + dx * from, a[1] + dy * from],
+      [a[0] + dx * to, a[1] + dy * to], bottom, height, color);
+  }
+}
+
+function appendRoof(batches: BuildingBatches, points: LocalPoint[], height: number, rise: number, holes: LocalPoint[][]) {
   const index = batches.roofs.length / 3;
+  const turns = points.map(([x, y], step) => {
+    const [a, b] = points[(step + 1) % points.length];
+    const [c, d] = points[(step + 2) % points.length];
+    return (a - x) * (d - b) - (b - y) * (c - a);
+  });
+  const concave = turns.some(turn => turn > 0.0001) && turns.some(turn => turn < -0.0001);
+  if (rise <= 0.2 || concave || holes.length > 0) {
+    for (const [x, y] of [...points, ...holes.flat()]) {
+      batches.roofs.push(x, height, -y);
+      batches.roofUv.push(x / 2.7, y / 2.7);
+    }
+    for (const corner of triangles(points, holes)) batches.roofIndices.push(index + corner);
+    return;
+  }
   const centroid = centerOf(points);
   const inner = points.map(([x, y]): LocalPoint => [
     centroid[0] + (x - centroid[0]) * 0.58,
@@ -773,35 +884,64 @@ function addBuildings(
   windowsSurface: MeshStandardMaterial,
   roofsSurface: MeshStandardMaterial,
   siding?: Texture,
+  nearby?: ReturnType<typeof routeIndex>,
 ) {
   const facade = material(0xffffff);
   facade.map = siding ?? null;
   facade.vertexColors = true;
   facade.side = DoubleSide;
   roofsSurface.side = DoubleSide;
+  const buildings = data.features.filter(feature => feature.type === 'building' && feature.points.length >= 3);
+  const large = buildings.length > 1800;
+  const batches = large ? spatialBatches(buildings, 340, feature => feature.points[0]) : [buildings];
+  for (const batch of batches) {
+    addBuildingCluster(group, data, batch, facade, windowsSurface, roofsSurface, nearby, large);
+  }
+}
+
+function addBuildingCluster(
+  group: Group,
+  data: WorldData,
+  features: WorldData['features'],
+  facade: MeshStandardMaterial,
+  windowsSurface: MeshStandardMaterial,
+  roofsSurface: MeshStandardMaterial,
+  nearby: ReturnType<typeof routeIndex> | undefined,
+  large: boolean,
+) {
   const buildingWindows: Transform[] = [];
   const frames: Transform[] = [];
   const batches: BuildingBatches = { walls: [], wallIndices: [], wallUv: [], colors: [], roofs: [], roofIndices: [], roofUv: [] };
   const paint = [0xb97b57, 0xe0d0b1, 0xbfc3b6, 0x9b5542, 0xaaa8a0, 0xb38d69, 0xe6d7c6];
 
-  for (const feature of data.features) {
-    if (feature.type !== 'building') continue;
+  for (const feature of features) {
     const outline = polygon(feature.points);
     if (outline.length < 3) continue;
     const random = generator(feature.osmId);
     const center = centerOf(outline);
     const point = coordinate(center, 0);
     const ground = elevationAt(data, point.x, point.z);
-    const base = Math.min(ground, ...outline.map(([x, y]) => elevationAt(data, x, -y))) - 0.25;
     const taggedHeight = Number.parseFloat(feature.tags.height ?? '');
+    const minHeight = Number.parseFloat(feature.tags.min_height ?? '') || 0;
+    const canopy = feature.tags.building === 'roof';
     const levels = Number.parseFloat(feature.tags['building:levels'] ?? '') || 1 + Math.floor(random() * 2);
-    const structureHeight = taggedHeight > 1 ? taggedHeight : 2.75 * levels;
-    const height = ground + structureHeight;
+    const inferredHeight = canopy ? 3.8 : 2.75 * levels;
+    const structureHeight = taggedHeight > Math.max(1, minHeight) ? taggedHeight : minHeight + inferredHeight;
+    const railBelow = nearby?.footprintRailHeights(outline);
+    const roofRise = canopy || feature.tags['roof:shape'] === 'flat' || outline.length > 10
+      ? 0 : Math.min(1.9, structureHeight * 0.23);
+    const roofElevation = ground + structureHeight;
+    const height = railBelow && roofElevation + roofRise > railBelow.low + 0.15
+      ? Math.max(roofElevation, railBelow.high + STRUCTURE_CLEARANCE_HEIGHT + 0.25) : roofElevation;
+    const base = canopy ? height - 0.23 : minHeight > 0 ? ground + minHeight
+      : Math.min(ground, ...outline.map(([x, y]) => elevationAt(data, x, -y))) - 0.25;
     const taggedColor = feature.tags['building:colour'];
     const color = new Color(taggedColor && /^#[0-9a-f]{6}$/i.test(taggedColor)
       ? taggedColor : paint[Math.floor(random() * paint.length)]);
+    const nearRail = !large || !nearby || [-60, 0, 60].some(dx => [-60, 0, 60]
+      .some(dz => nearby(point.x + dx, point.z + dz) !== undefined));
     const shed = feature.tags.building === 'shed' || feature.tags.building === 'garage';
-    const roofRise = feature.tags['roof:shape'] === 'flat' || outline.length > 10 ? 0.15 : Math.min(1.9, structureHeight * 0.23);
+    const needsPassage = nearby && railBelow && base <= railBelow.high + STRUCTURE_CLEARANCE_HEIGHT;
 
     for (let index = 0; index < outline.length; index++) {
       const a = outline[index];
@@ -810,8 +950,9 @@ function addBuildings(
       const dz = a[1] - b[1];
       const length = Math.hypot(dx, dz);
       if (length === 0) continue;
-      appendWall(batches, a, b, base, height, color);
-      if (shed || length < 3.4) continue;
+      if (needsPassage) appendRailClearWall(batches, a, b, base, height, color, nearby);
+      else appendWall(batches, a, b, base, height, color);
+      if (!nearRail || canopy || shed || length < 3.4) continue;
 
       const direction = new Vector3(dx / length, 0, dz / length);
       const rotation = new Quaternion().setFromUnitVectors(X, direction);
@@ -822,6 +963,9 @@ function addBuildings(
         const sill = ground + (floor + 0.55) * structureHeight / floors;
         for (let column = 0; column < across; column++) {
           const position = coordinate(a, sill).addScaledVector(direction, length * (column + 0.5) / across);
+          const adjacent = nearby?.(position.x, position.z);
+          if (adjacent && adjacent.distance < STRUCTURE_CLEARANCE_WIDTH
+            && Math.abs(position.y - adjacent.height) < STRUCTURE_CLEARANCE_HEIGHT) continue;
           frames.push({ position, rotation, scale: new Vector3(1.12, 1.24, 0.14) });
           buildingWindows.push({
             position: position.clone().addScaledVector(normal, 0.002),
@@ -832,7 +976,8 @@ function addBuildings(
         }
       }
     }
-    appendRoof(batches, outline, height, roofRise);
+    const holes = (feature.holes ?? []).map(polygon).filter(hole => hole.length >= 3);
+    appendRoof(batches, outline, height, roofRise, holes);
   }
 
   if (batches.walls.length) {
@@ -1341,10 +1486,11 @@ function addSignals(
     const heading = new Vector3(east, 0, -north).normalize();
     const foot = coordinate(point, 0);
     if (heading.lengthSq() > 0) {
-      const side = new Vector3().crossVectors(heading, UP).multiplyScalar(2.85);
-      const right = foot.clone().add(side);
-      const left = foot.clone().sub(side);
-      foot.copy(distanceToTrack(right.x, right.z) >= distanceToTrack(left.x, left.z) ? right : left);
+      const side = new Vector3().crossVectors(heading, UP);
+      const offsets = [2.85, -2.85, 2.08, -2.08, 3.65, -3.65];
+      const sites = offsets.map(offset => foot.clone().addScaledVector(side, offset));
+      sites.sort((a, b) => distanceToTrack(b.x, b.z) - distanceToTrack(a.x, a.z));
+      foot.copy(sites[0]);
     }
     foot.y = elevationAt(data, foot.x, foot.z);
     const top = foot.clone().add(new Vector3(0, 3.5, 0));
@@ -1588,10 +1734,10 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   const terrain = createTerrain(data, nearby, ground, placement?.ownsCell);
   const terrainTiles = terrain.children.filter(tile => tile instanceof Mesh);
   group.add(terrain);
-  addTrack(group, data, rail, ballast, concrete);
+  const applyTrackDetail = addTrack(group, data, rail, ballast, concrete);
   addParallelTracks(group, data, nearby, ballast);
   addWater(group, data, water);
-  addBuildings(group, data, windows, roofs, maps.siding);
+  addBuildings(group, data, windows, roofs, maps.siding, nearby);
   addForests(group, data, nearby, foliage, distantFoliage, placement?.ownsCell);
   const grass = addTracksideGrass(group, data, rail, nearby);
   const setSignal = addSignals(group, data, nearby);
@@ -1625,6 +1771,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   let waterTime = 0;
   const update = (seconds: number, camera: Vector3) => {
     grass.applyDistance(camera);
+    applyTrackDetail(camera);
     for (const tile of terrainTiles) {
       const center = tile.geometry.boundingSphere?.center;
       const detailed = center && camera.distanceToSquared(center) <= 390 ** 2;
@@ -1639,6 +1786,50 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   return { group, setWeather, setNight, setSignal, update };
 }
 
+
+function indexClearanceMeshes(objects: Object3D[]) {
+  const cellSize = 160;
+  const cells = new Map<string, Object3D[]>();
+  const bounds = new Box3();
+  const insert = (x: number, z: number, object: Object3D) => {
+    const key = `${x}:${z}`;
+    const existing = cells.get(key);
+    if (existing) existing.push(object);
+    else cells.set(key, [object]);
+  };
+  for (const object of objects) {
+    if (!(object instanceof Mesh)) continue;
+    let localBounds: Box3 | null;
+    if (object instanceof InstancedMesh) {
+      if (!object.boundingBox) object.computeBoundingBox();
+      localBounds = object.boundingBox;
+    } else {
+      if (!object.geometry.boundingBox) object.geometry.computeBoundingBox();
+      localBounds = object.geometry.boundingBox;
+    }
+    if (!localBounds || localBounds.isEmpty()) continue;
+    bounds.copy(localBounds).applyMatrix4(object.matrixWorld).expandByScalar(0.001);
+    for (let x = Math.floor(bounds.min.x / cellSize); x <= Math.floor(bounds.max.x / cellSize); x++) {
+      for (let z = Math.floor(bounds.min.z / cellSize); z <= Math.floor(bounds.max.z / cellSize); z++) {
+        insert(x, z, object);
+      }
+    }
+  }
+  return (first: Vector3, last = first) => {
+    const minX = Math.floor(Math.min(first.x, last.x) / cellSize);
+    const maxX = Math.floor(Math.max(first.x, last.x) / cellSize);
+    const minZ = Math.floor(Math.min(first.z, last.z) / cellSize);
+    const maxZ = Math.floor(Math.max(first.z, last.z) / cellSize);
+    if (minX === maxX && minZ === maxZ) return cells.get(`${minX}:${minZ}`) ?? [];
+    const candidates = new Set<Object3D>();
+    for (let x = minX; x <= maxX; x++) {
+      for (let z = minZ; z <= maxZ; z++) {
+        for (const object of cells.get(`${x}:${z}`) ?? []) candidates.add(object);
+      }
+    }
+    return [...candidates];
+  };
+}
 
 export interface TrackbedAudit {
   sampleCount: number;
@@ -1659,6 +1850,8 @@ export function auditTrackbed(
   const beds = group.children.filter((object) => object.name === 'Running line ballast');
   if (!ground || !beds.length) throw new Error('The scene is missing rendered ground or trackbed geometry');
   group.updateWorldMatrix(true, true);
+  const terrainAt = indexClearanceMeshes(ground.children);
+  const ballastAt = indexClearanceMeshes(beds);
   const ray = new Raycaster();
   const direction = new Vector3(0, -1, 0);
   const surface: Intersection[] = [];
@@ -1684,8 +1877,8 @@ export function auditTrackbed(
         origin.copy(position).addScaledVector(axis, lateral);
         origin.y = Math.max(position.y, highestPoint) + 25;
         ray.set(origin, direction);
-        ray.intersectObjects(ground.children, false, surface);
-        ray.intersectObjects(beds, false, ballast);
+        ray.intersectObjects(terrainAt(origin), false, surface);
+        ray.intersectObjects(ballastAt(origin), false, ballast);
         result.sampleCount++;
         if (!surface.length || !ballast.length) {
           result.missingCount++;
@@ -1715,6 +1908,7 @@ export function auditVehicleClearance(group: Group, rail: Rail, spacing = 2) {
   const direction = new Vector3();
   const body = new Vector3();
   const origin = new Vector3();
+  const end = new Vector3();
   const axial = new Vector3(0, 0, 1);
   const downward = new Vector3(0, -1, 0);
   const bodyAttitude = new Quaternion();
@@ -1724,6 +1918,7 @@ export function auditVehicleClearance(group: Group, rail: Rail, spacing = 2) {
   ray.far = 3.4;
   const result = { samples: 0, intersections: 0, first: null as null | { distance: number; object: string } };
   group.updateWorldMatrix(true, true);
+  const obstaclesAt = indexClearanceMeshes(obstacles);
 
   for (let distance = 12; distance < rail.length - 12; distance += spacing) {
     const front = rail.position(distance + 8.3);
@@ -1737,7 +1932,8 @@ export function auditVehicleClearance(group: Group, rail: Rail, spacing = 2) {
         origin.set(side, 4.14, length).applyQuaternion(bodyAttitude).add(body);
         ray.set(origin, direction);
         hits.length = 0;
-        ray.intersectObjects(obstacles, false, hits);
+        end.copy(origin).addScaledVector(direction, ray.far);
+        ray.intersectObjects(obstaclesAt(origin, end), false, hits);
         result.samples++;
         if (hits.length) {
           result.intersections++;

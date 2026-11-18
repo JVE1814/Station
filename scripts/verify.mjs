@@ -16,7 +16,8 @@ if (check('Clean install', 'npm', ['ci'])) {
   check('Tests', 'npm', ['test']);
   const built = check('Production build', 'npm', ['run', 'build']);
   check('R40 geography and autopilot', process.execPath, ['scripts/verify-world.mjs']);
-  check('F4, F5 and F6 network geography and autopilot', process.execPath, ['scripts/verify-coverage.mjs']);
+  const network = check('F4, F5 and F6 network geography and autopilot', process.execPath, ['scripts/verify-coverage.mjs']);
+  if (network) check('Intercity rendered geometry clearance', process.execPath, ['scripts/verify-network-clearance.mjs']);
   check('R40 rendered geometry clearance', process.execPath, ['scripts/verify-clearance.mjs']);
   if (built) check('R40 1080p browser frame timing', 'npm', ['run', 'verify:browser']);
 }

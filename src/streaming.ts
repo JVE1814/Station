@@ -5,7 +5,8 @@ import { readWorldAsset } from './network';
 import { Rail } from './rail';
 import { createScenery } from './scenery';
 import type { SceneryMaps, SceneryPlacement } from './scenery';
-import type { TrackSpan, WorldData } from './world-data';
+import { groundHeight } from './world-data';
+import type { TerrainData, TrackSpan, WorldData } from './world-data';
 import type { Weather } from './atmosphere';
 import type { SignalAspect } from './blocks';
 
@@ -54,6 +55,7 @@ function lineDistance(points: Vector3[], x: number, z: number): number {
 export class SceneryStream {
   readonly group = new Group();
   private readonly loaded = new Map<string, TileScene>();
+  private readonly terrain = new Map<string, TerrainData>();
   private readonly pending = new Map<string, AbortController>();
   private readonly signalAspects = new Map<number, SignalAspect>();
   private readonly sharedTextures: Set<Texture>;
@@ -103,10 +105,19 @@ export class SceneryStream {
     for (const tile of this.loaded.values()) tile.setSignal(aspect, id);
   }
 
-  update(seconds: number, camera: Vector3, distance: number): void {
+  heightAt(x: number, z: number): number | undefined {
+    for (const tile of this.tiles) {
+      if (!covers(tile, x, z)) continue;
+      const grid = this.terrain.get(tile.id);
+      if (grid) return groundHeight(grid, x, -z);
+    }
+    return undefined;
+  }
+
+  update(seconds: number, camera: Vector3, distance: number, focus?: Vector3): void {
     const train = this.mainRail.position(distance);
     const nearest = this.tiles.filter(tile => (tile.start <= distance + 3000 && tile.end >= distance - 2200)
-      || covers(tile, train.x, train.z, 400));
+      || covers(tile, train.x, train.z, 400) || (focus && covers(tile, focus.x, focus.z, 250)));
     const requested = new Set(nearest.map(tile => tile.id));
     for (const tile of nearest) {
       if (!this.loaded.has(tile.id) && !this.pending.has(tile.id) && !this.failures.has(tile.id)) {
@@ -125,6 +136,7 @@ export class SceneryStream {
         tile.group.removeFromParent();
         dispose(tile, this.sharedTextures);
         this.loaded.delete(id);
+        this.terrain.delete(id);
       }
     }
   }
@@ -173,6 +185,7 @@ export class SceneryStream {
       scenery.setNight(this.night);
       for (const [id, aspect] of this.signalAspects) scenery.setSignal(aspect, id);
       this.loaded.set(tile.id, scenery);
+      this.terrain.set(tile.id, world.terrain);
       this.group.add(scenery.group);
     } catch (error) {
       if (!transfer.signal.aborted) throw error;

@@ -1230,8 +1230,33 @@ function isWaitingShelter(feature: WorldData['features'][number]) {
     && ['public_transport', undefined].includes(feature.tags.shelter_type);
 }
 
+export function sharedShelterEntrance(outline: LocalPoint[], platforms: PassengerPlatform[]) {
+  const center = centerOf(outline);
+  const matches = (point: LocalPoint, candidate: LocalPoint) =>
+    Math.hypot(point[0] - candidate[0], point[1] - candidate[1]) < 0.015;
+  let entrance: { index: number; deck: PassengerPlatform; width: number } | undefined;
+  for (let index = 0; index < outline.length; index++) {
+    const a = outline[index];
+    const b = outline[(index + 1) % outline.length];
+    const width = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (width < 1.4 || (entrance && width <= entrance.width)) continue;
+    const mid: LocalPoint = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const dx = (a[1] - b[1]) / width;
+    const dy = (b[0] - a[0]) / width;
+    const sign = (center[0] - mid[0]) * dx + (center[1] - mid[1]) * dy > 0 ? -1 : 1;
+    const deck = platforms.find(platform => platform.outline.some((point, i, points) => {
+      const next = points[(i + 1) % points.length];
+      return (matches(a, point) && matches(b, next)) || (matches(a, next) && matches(b, point));
+    }) && [0.12, 0.6].every(setback => inside(
+      [mid[0] + dx * sign * setback, mid[1] + dy * sign * setback], platform.outline,
+    )));
+    if (deck) entrance = { index, deck, width };
+  }
+  return entrance;
+}
+
 function addWaitingShelters(
-  group: Group, data: WorldData, platforms: PassengerPlatform[], siding?: Texture,
+  group: Group, data: WorldData, platforms: PassengerPlatform[], nearby: ReturnType<typeof routeIndex>, siding?: Texture,
 ) {
   const timber = material(0x915e47, 0.85);
   timber.map = timber.bumpMap = siding ?? null;
@@ -1249,7 +1274,11 @@ function addWaitingShelters(
     if (outline.length < 3) continue;
     const footprint = outline.map(point => coordinate(point, 0));
     const edges = footprint.map((point, index) => footprint[(index + 1) % footprint.length].clone().sub(point));
-    const along = edges.reduce((longest, edge) => edge.lengthSq() > longest.lengthSq() ? edge : longest).normalize();
+    // Where mapping shares an edge, the opening joins that deck directly. Testing only
+    // the long sides misses shelters whose short end is the opening.
+    const entrance = sharedShelterEntrance(outline, platforms);
+    const along = (entrance ? edges[entrance.index]
+      : edges.reduce((longest, edge) => edge.lengthSq() > longest.lengthSq() ? edge : longest)).normalize();
     if (!along.lengthSq()) continue;
     const facing = new Vector3(-along.z, 0, along.x);
     const bounds = (axis: Vector3) => {
@@ -1267,16 +1296,19 @@ function addWaitingShelters(
     const positiveDeck = frontDeck(1);
     const negativeDeck = frontDeck(-1);
     const center = locate(mid, (depth.min + depth.max) / 2);
-    const farSide = negativeDeck && !positiveDeck;
+    const entrancePoint = entrance
+      ? footprint[entrance.index].clone().lerp(footprint[(entrance.index + 1) % footprint.length], 0.5)
+      : undefined;
+    const farSide = entrancePoint ? entrancePoint.clone().sub(center).dot(facing) < 0 : negativeDeck && !positiveDeck;
     if (farSide) {
       facing.negate();
       depth = bounds(facing);
     }
-    const deck = (farSide ? negativeDeck : positiveDeck);
+    const deck = entrance?.deck ?? (farSide ? negativeDeck : positiveDeck);
     const width = span.max - span.min;
     const length = depth.max - depth.min;
     if (width < 1.4 || length < 0.85) continue;
-    const threshold = locate(mid, depth.max + 0.05);
+    const threshold = entrancePoint ?? locate(mid, depth.max + 0.05);
     const base = deck?.levelAt(threshold.x, threshold.z) ?? elevationAt(data, center.x, center.z);
     if (deck) {
       (deck.occupied ??= []).push({ position: center, radius: Math.hypot(width, length) / 2 });
@@ -1311,7 +1343,27 @@ function addWaitingShelters(
     }
     timberParts.push(part(mid, 1.08, rear, width - 0.16, 1.91, 0.075));
     if (!deck || !inside([center.x, -center.z], deck.outline)) {
-      trimParts.push(part(mid, -0.067, (rear + front) / 2, width - 0.15, 0.13, length - 0.12));
+      if (entrance) {
+        const positions = footprint.flatMap(point => [point.x, base, point.z]);
+        const indices = triangles(outline);
+        // Close the raised floor down to the graded ground along its exposed sides.
+        for (let i = 0; i < footprint.length; i++) {
+          if (i === entrance.index) continue;
+          const j = (i + 1) % footprint.length;
+          const a = footprint[i];
+          const b = footprint[j];
+          const bottom = positions.length / 3;
+          positions.push(a.x, Math.min(base - 0.1, gradedHeight(data, nearby, a.x, a.z)), a.z,
+            b.x, Math.min(base - 0.1, gradedHeight(data, nearby, b.x, b.z)), b.z);
+          indices.push(i, bottom, j, j, bottom, bottom + 1);
+        }
+        const floor = mesh(positions, indices, trim);
+        floor.name = 'Platform furniture';
+        floor.receiveShadow = true;
+        group.add(floor);
+      } else {
+        trimParts.push(part(mid, -0.067, (rear + front) / 2, width - 0.15, 0.13, length - 0.12));
+      }
     }
     if (feature.tags.bench === 'yes') {
       const benchWidth = Math.min(1.86, width - 0.32);
@@ -2582,7 +2634,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   const grass = vegetation ? undefined : addTracksideGrass(group, data, rail, nearby);
   const setSignal = addSignals(group, data, nearby);
   const { bulbs, platforms, setPlatformWeather } = addPlatforms(group, data, rail, concrete, fixtures, nearby, polished, maps.siding);
-  if (polished) addWaitingShelters(group, data, platforms, maps.siding);
+  if (polished) addWaitingShelters(group, data, platforms, nearby, maps.siding);
   const streets = maps.vossStreets;
   if (polished && streets && data.stations.some(station => station.osmId === streets.stationOsmId)) {
     group.add(createVossStreets(streets, {

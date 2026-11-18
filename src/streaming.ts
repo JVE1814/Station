@@ -59,7 +59,7 @@ export class SceneryStream {
   private readonly loaded = new Map<string, TileScene>();
   private readonly shores = new Map<string, (chainage: number) => number>();
   private readonly terrain = new Map<string, TerrainData>();
-  private readonly pending = new Map<string, AbortController>();
+  private readonly pending = new Map<string, { transfer: AbortController; completion: Promise<void> }>();
   private readonly signalAspects = new Map<number, SignalAspect>();
   private readonly sharedTextures: Set<Texture>;
   private readonly failures = new Set<string>();
@@ -148,7 +148,7 @@ export class SceneryStream {
         });
       }
     }
-    for (const [id, transfer] of this.pending) {
+    for (const [id, { transfer }] of this.pending) {
       if (!requested.has(id)) transfer.abort();
     }
     for (const [id, tile] of this.loaded) {
@@ -189,9 +189,17 @@ export class SceneryStream {
     };
   }
 
-  private async load(tile: RouteTile): Promise<void> {
+  private load(tile: RouteTile): Promise<void> {
+    if (this.loaded.has(tile.id)) return Promise.resolve();
+    const current = this.pending.get(tile.id);
+    if (current && !current.transfer.signal.aborted) return current.completion;
     const transfer = new AbortController();
-    this.pending.set(tile.id, transfer);
+    const completion = this.loadTile(tile, transfer);
+    this.pending.set(tile.id, {transfer, completion});
+    return completion;
+  }
+
+  private async loadTile(tile: RouteTile, transfer: AbortController): Promise<void> {
     try {
       const url = tile.url.startsWith('data/') ? tile.url : `data/${tile.url}`;
       const world = await readWorldAsset<WorldData>(url, transfer.signal);
@@ -204,6 +212,7 @@ export class SceneryStream {
       });
       const rail = new Rail(world.rail);
       const scenery = createScenery(world, rail, this.maps, placement);
+      scenery.group.userData.tileId = tile.id;
       if (this.maps.polished) this.shores.set(tile.id, createLakesideProfile(world, rail));
       scenery.setWeather(this.weather);
       scenery.setNight(this.night);
@@ -216,7 +225,7 @@ export class SceneryStream {
     } catch (error) {
       if (!transfer.signal.aborted) throw error;
     } finally {
-      this.pending.delete(tile.id);
+      if (this.pending.get(tile.id)?.transfer === transfer) this.pending.delete(tile.id);
     }
   }
 }

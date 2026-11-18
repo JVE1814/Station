@@ -651,7 +651,10 @@ async function run(): Promise<void> {
     if (now >= nextStatus || paused) {
       world.dataset.stage = 'running';
       if (cameras.settled) world.dataset.view = cameras.view;
-      if (shot) world.dataset.captureFrame = String(now);
+      if (shot) {
+        world.dataset.captureFrame = String(now);
+        world.dataset.sceneryTiles = activeStream?.group.children.map(tile => tile.userData.tileId).join(',');
+      }
       world.dataset.drawCalls = String(renderer.info.render.calls);
       world.dataset.triangles = String(renderer.info.render.triangles);
       world.dataset.chainage = chainage.toFixed(2);

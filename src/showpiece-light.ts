@@ -265,8 +265,8 @@ export class ShowpieceLight {
     physical.uniforms.cloudElevation.value = .64;
     physical.uniforms.showSunDisc.value = overcast ? 0 : 1;
     this.direct = night ? .29 : overcast ? 1.12 : 3.35;
-    this.fill = night ? 1.47 : overcast ? 2.05 : 1.57;
-    this.ambient.color.setHex(night ? 0x91acdf : overcast ? 0xd3e2f1 : 0xb8cde4);
+    this.fill = night ? 1.47 : overcast ? 2.05 : 1.86;
+    this.ambient.color.setHex(night ? 0x91acdf : overcast ? 0xd3e2f1 : 0xc2cddb);
     this.ambient.groundColor.setHex(night ? 0x545d74 : snow ? 0x9faebe : 0x76654e);
     this.fog.color.set(new Color(night ? 0x435778 : snow ? 0x9aafc6 : weather === 'rain' ? 0x9eacb0 : 0xaebcc5));
     this.density = snow ? .00215 : weather === 'rain' ? .0011 : night ? .00058 : .00048;

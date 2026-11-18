@@ -662,7 +662,7 @@ export function createTrain(leading = true, brushedSteel?: Texture, showpiece = 
   const { siding, underframe, metal, trim } = materials;
   const paintedShell = showpiece ? new MeshPhysicalMaterial({
     color: 0x9f2527, roughness: 0.33, metalness: 0.22, clearcoat: 0.78,
-    clearcoatRoughness: 0.16, vertexColors: true,
+    clearcoatRoughness: 0.21, vertexColors: true,
   }) : materials.paint;
   const roofSnow = paintedShell instanceof MeshPhysicalMaterial ? snowOnPaint(paintedShell) : undefined;
   siding.map = brushedSteel ?? null;
@@ -694,7 +694,7 @@ export function createTrain(leading = true, brushedSteel?: Texture, showpiece = 
     windowMaterial.emissiveIntensity = state.night ? (showpiece ? 1.85 : 0.75) : showpiece ? .063 : .025;
     if (paintedShell instanceof MeshPhysicalMaterial) {
       paintedShell.roughness = state.weather === 'rain' ? 0.24 : 0.33;
-      paintedShell.clearcoatRoughness = state.weather === 'rain' ? 0.09 : 0.16;
+      paintedShell.clearcoatRoughness = state.weather === 'rain' ? 0.09 : 0.21;
       siding.roughness = state.weather === 'rain' ? 0.28 : 0.35;
     }
     if (roofSnow) roofSnow.value = state.weather === 'snow' ? 0.92 : 0;

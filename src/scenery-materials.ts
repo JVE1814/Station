@@ -1,5 +1,5 @@
 import { CanvasTexture, RepeatWrapping, SRGBColorSpace } from 'three';
-import type { MeshStandardMaterial, Texture } from 'three';
+import type { MeshLambertMaterial, MeshStandardMaterial, Texture } from 'three';
 
 function noiseLayer(size: number, seed: number) {
   const grid = new Float32Array(size * size);
@@ -142,7 +142,7 @@ export function blendExposedRock(material: MeshStandardMaterial, rock: Texture, 
             + terrainPattern(vGround.xz, vec2(1,0), mottling) * weights.y
             + terrainPattern(vGround.xy, vec2(1,0), mottling) * weights.z;
           vec3 pasture = mix(mix(groundGrass, groundHeath, heathCover), forestBed, forestLitter);
-          vec3 closeDetail = mix(pasture, stoneDetail, stone) * (1.49 + .25 * broad);
+          vec3 closeDetail = mix(pasture, stoneDetail, stone) * (1.84 + .27 * broad);
           groundColor = mix(closeDetail, groundColor, smoothstep(115.0, 760.0, length(vViewPosition)));
         ` : ''}
         float dust = smoothstep(710.0, 1010.0, vGround.y + 90.0 * (broad - .5))
@@ -159,4 +159,26 @@ export function blendExposedRock(material: MeshStandardMaterial, rock: Texture, 
     `);
   };
   material.customProgramCacheKey = () => `${cache.call(material)}:exposed-rock:${Boolean(detail)}`;
+}
+
+export function dustHighPeaks(material: MeshLambertMaterial): void {
+  const compile = material.onBeforeCompile;
+  const cache = material.customProgramCacheKey;
+  material.onBeforeCompile = (shader, renderer) => {
+    compile.call(material, shader, renderer);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec4 vSummit;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSummit = vec4(position, normal.y);');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec4 vSummit;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        vec2 hill = vSummit.xz;
+        float exposure = sin(hill.x * .016 + sin(hill.y * .026)) * cos(hill.y * .029 - sin(hill.x * .024));
+        float patch = sin(hill.x * .071 + hill.y * .055) * cos(hill.y * .077);
+        float dusting = smoothstep(610.0, 847.0, vSummit.y + 61.0 * exposure + 24.0 * patch)
+          * smoothstep(.36, .84, vSummit.w);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.63, .73, .82), dusting * .62);
+      `);
+  };
+  material.customProgramCacheKey = () => `${cache.call(material)}:summit-dusting`;
 }

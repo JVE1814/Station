@@ -28,7 +28,7 @@ import type { Intersection, Material, Texture } from 'three';
 import type { Rail } from './rail';
 import { gabledRoof } from './roof.ts';
 import type { GabledRoof } from './roof.ts';
-import { blendExposedRock, civilTexture } from './scenery-materials.ts';
+import { blendExposedRock, civilTexture, dustHighPeaks } from './scenery-materials.ts';
 import { applyWaterBanks, createShorelineField } from './lake-surface.ts';
 import { buildRiverSurface } from './river-surface.ts';
 import { createVossStreets, sampleVossStreetTerrain } from './voss-streets.ts';
@@ -2538,6 +2538,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
     coatedBySnow(roofs, 0.87), coatedBySnow(concrete, 0.29)];
   if (foliage && distantFoliage) snow.push(coatedBySnow(foliage, 0.64, true), coatedBySnow(distantFoliage, 0.64, true));
   if (exposedRock) blendExposedRock(ground, exposedRock, maps.terrainDetail);
+  if (polished) dustHighPeaks(distantGround);
   const nearby = routeIndex(placement?.gradeRail ?? rail, placement?.gradeSpans ?? data.spans);
   const paint = terrainPalette(data, nearby, Boolean(exposedRock));
   const terrain = createTerrain(data, nearby, ground, paint, Boolean(exposedRock), placement?.ownsCell);

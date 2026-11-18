@@ -61,6 +61,10 @@ try {
       await writeFile(name, Buffer.from(data,'base64'));
       const info = await page.locator('#world').evaluate(node => ({...node.dataset}));
       assert.ok(Math.abs(Number(info.chainage) - shot.distance) < .02);
+      if (info.sceneryTiles) {
+        const tileIds = info.sceneryTiles.split(',');
+        assert.equal(new Set(tileIds).size, tileIds.length, 'Capture loaded the same scenery tile twice');
+      }
       console.log(name, shot.distance.toFixed(1), [info.drawCalls, info.triangles]);
       assert.deepEqual(errors.splice(0), []);
       reusable = info.captureControls === 'ready';

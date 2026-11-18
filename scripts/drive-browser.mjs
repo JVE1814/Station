@@ -21,7 +21,7 @@ try {
     args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
   });
   try {
-    const page = await browser.newPage({ viewport: { width: 800, height: 500 } });
+    const page = await browser.newPage({ viewport: { width: 640, height: 400 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => {
@@ -30,6 +30,7 @@ try {
     await page.goto(url.href);
     await page.waitForFunction(() => document.getElementById('world').dataset.stage === 'running', null,
       { timeout: 90_000, polling: 120 });
+    console.log('R40 loaded. Starting the keyboard practice and live drive.');
 
     const state = () => page.evaluate(() => {
       const element = id => document.getElementById(id);
@@ -58,8 +59,10 @@ try {
     const waitForView = view => page.waitForFunction(selected => document.getElementById('world').dataset.view === selected,
       view, { timeout: 60_000, polling: 120 });
     const setNotch = async (change, up, down) => {
+      if (change === 0) return;
       const key = change > 0 ? up : down;
-      for (let step = 0; step < Math.abs(change); step++) await press(key);
+      for (let step = 0; step < Math.abs(change); step++) await page.keyboard.down(key);
+      await page.keyboard.up(key);
     };
     const setControls = async (current, power, brake) => {
       if (power === current.power && brake === current.brake) return;
@@ -77,8 +80,11 @@ try {
 
     await press('t');
     await press('t');
-    const waitForPractice = heading => page.waitForFunction(title => document.getElementById('training-title').textContent === title
-      && !document.getElementById('training').hidden, heading, { timeout: 60_000, polling: 120 });
+    const waitForPractice = async heading => {
+      await page.waitForFunction(title => document.getElementById('training-title').textContent === title
+        && !document.getElementById('training').hidden, heading, { timeout: 60_000, polling: 120 });
+      console.log(`Practice · ${heading}`);
+    };
     await press('l');
     await waitForPractice('Release the brake');
     await setNotch(-5, 'e', 'q');
@@ -142,7 +148,8 @@ try {
         const advice = current.cue.match(/\bPower (\d)/i)?.[1];
         const aim = Number(current.cue.match(/(\d+) km\/h/)?.[1]);
         const belowAim = aim - current.speed;
-        const power = brake ? 0 : advice !== undefined ? Number(advice) : belowAim > 3 ? 5 : belowAim > 1 ? 2 : 0;
+        const power = brake || current.cue.startsWith('Coast') ? 0
+          : advice !== undefined ? Number(advice) : belowAim > 3 ? 5 : belowAim > 1 ? 2 : 0;
         await setControls(current, power, brake);
       }
       await page.waitForTimeout(120);

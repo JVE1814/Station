@@ -75,6 +75,36 @@ try {
   }
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);
+
+  const layout = await browser.newPage({viewport:{width:960, height:600}});
+  await layout.route('**/assets/*.js', route => route.fulfill({contentType:'text/javascript', body:''}));
+  await layout.goto(origin.href);
+  for (const width of [960, 720]) {
+    await layout.setViewportSize({width, height:600});
+    const result = await layout.evaluate(() => {
+      document.body.classList.add('showpiece');
+      const card = document.getElementById('trip-result');
+      card.hidden = false;
+      for (const [id, value] of Object.entries({
+        'result-title': 'Seimsgrend', 'result-score': '83 / 100', 'result-timing': '89 s late',
+        'result-position': '1.1 m from marker', 'result-passengers': '10 boarded · 7 alighted',
+        'brake-cue': 'Within stop zone · D to open doors',
+      })) {
+        const element = document.getElementById(id);
+        element.hidden = false;
+        element.textContent = value;
+      }
+      for (const button of document.querySelectorAll('.auxiliary button')) button.hidden = false;
+      const button = document.getElementById('hide-result');
+      const bounds = button.getBoundingClientRect();
+      const front = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+      return card.getBoundingClientRect().bottom < document.querySelector('.bottom-bar').getBoundingClientRect().top
+        && button.contains(front);
+    });
+    assert.ok(result, `Stop results must clear the controls at ${width}×600`);
+  }
+  await layout.close();
+  console.log('Stop result dismissal is visible and clickable at 960×600 and 720×600.');
 } finally {
   await browser.close();
   server.httpServer.close();

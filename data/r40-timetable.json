@@ -1,0 +1,27 @@
+{
+  "date": "20261118",
+  "feed": {
+    "feed_id": "ENTUR",
+    "feed_publisher_name": "Entur",
+    "feed_publisher_url": "https://www.entur.org",
+    "feed_lang": "no"
+  },
+  "sha256": "b98b0f21a12a5562c0baafd10de9197c83e8d580d8a51528bb36f5cef102b76e",
+  "line": "R40",
+  "from": "Seimsgrend stasjon",
+  "to": "Bulken stasjon",
+  "services": [
+    {
+      "trip": "VYG:ServiceJourney:1804_443390-R",
+      "headsign": "Voss",
+      "departure": "08:08:00",
+      "arrival": "08:11:00"
+    },
+    {
+      "trip": "VYG:ServiceJourney:1822_481192-R",
+      "headsign": "Voss",
+      "departure": "16:24:00",
+      "arrival": "16:27:00"
+    }
+  ]
+}

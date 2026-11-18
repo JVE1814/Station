@@ -4,14 +4,19 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18"
   },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "python3 -m unittest discover -s scripts -v && node --test scripts/*.mjs"
+    "test": "python3 -m unittest discover -s scripts -v && node --test scripts/test-*.mjs",
+    "data": "python3 scripts/bake_pair.py 18567357 432630619 5594658999 public/data/service.json --timetable data/r40-timetable.json",
+    "verify:browser": "node scripts/check-browser.mjs",
+    "verify:pair": "npm run typecheck && npm run lint && npm test && npm run build && node scripts/verify-world.mjs && npm run verify:browser",
+    "preview": "vite preview",
+    "verify": "npm ci && npm run verify:pair && node scripts/verify-coverage.mjs"
   },
   "dependencies": {
     "three": "^0.187.0"
@@ -19,6 +24,8 @@
   "devDependencies": {
     "@types/three": "^0.187.0",
     "eslint": "^10.15.0",
+    "playwright-core": "^1.65.1",
+    "proj4": "^2.23.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.73.0",
     "vite": "^8.3.8"

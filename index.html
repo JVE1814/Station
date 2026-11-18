@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#101a1e">
+    <title>Station</title>
+    <link rel="icon" href="data:,">
+  </head>
+  <body>
+    <main id="simulator" aria-label="Train simulator">
+      <div id="world"></div>
+      <div class="top-bar">
+        <section class="service-panel" aria-label="Current service">
+          <div class="service-line"><span id="line"></span><time id="clock"></time></div>
+          <h1 id="journey">Station</h1>
+          <p id="next-stop"></p>
+        </section>
+        <div class="toolbar" aria-label="View and environment">
+          <div class="group" aria-label="Camera views">
+            <button id="cab-view" aria-pressed="true">Cab <kbd>1</kbd></button>
+            <button id="chase-view" aria-pressed="false">Chase <kbd>2</kbd></button>
+            <button id="map-view" aria-pressed="false">Bird’s-eye <kbd>3</kbd></button>
+          </div>
+          <div class="group" aria-label="Weather and time">
+            <button id="day">Day</button>
+            <button id="weather">Clear</button>
+            <button id="compression">1×</button>
+          </div>
+        </div>
+      </div>
+      <p class="notice" id="notice" role="status">Loading service…</p>
+      <div class="bottom-bar">
+        <section class="speed-panel" aria-label="Train speed">
+          <span id="speed">0</span><span class="units">km/h</span>
+          <span class="limit" id="limit" title="Line speed limit">—</span>
+        </section>
+        <section class="controls-panel" aria-label="Driving controls">
+          <div class="control"><span>Power</span><button id="less-power" aria-label="Reduce power"><kbd>S</kbd></button><meter id="power" min="0" max="1"></meter><button id="more-power" aria-label="Increase power"><kbd>W</kbd></button></div>
+          <div class="control"><span>Brake</span><button id="less-brake" aria-label="Release brake"><kbd>Q</kbd></button><meter id="brake" min="0" max="1"></meter><button id="more-brake" aria-label="Apply brake"><kbd>E</kbd></button></div>
+        </section>
+        <div class="group auxiliary" aria-label="Auxiliary controls">
+          <button id="doors">Doors <kbd>D</kbd></button>
+          <button id="horn">Horn <kbd>H</kbd></button>
+          <button id="auto" aria-pressed="false">Auto <kbd>A</kbd></button>
+        </div>
+      </div>
+      <details class="help"><summary>Controls</summary><p>Drag to look around. Scroll to zoom. Use 1–3 to switch cameras. Time compression cycles from 1× to 5×.</p></details>
+      <small class="attribution">© OpenStreetMap contributors · Copernicus DEM</small>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -15,6 +15,25 @@ export interface DriverControls {
   doorsOpen: boolean;
 }
 
+function fullTraction(speed: number): number {
+  return 0.8 / (1 + speed / 32);
+}
+
+function resistance(speed: number, gradient: number): number {
+  return 0.012 + speed ** 2 * 0.000019 + 9.81 * gradient;
+}
+
+export function applyAcceleration(
+  controls: DriverControls,
+  speed: number,
+  gradient: number,
+  acceleration: number,
+): void {
+  const effort = acceleration + resistance(speed, gradient);
+  controls.throttle = Math.max(0, Math.min(1, effort / fullTraction(speed)));
+  controls.brake = Math.max(0, Math.min(1, -effort / SERVICE_DECELERATION));
+}
+
 export function stepTrain(
   state: TrainState,
   controls: DriverControls,
@@ -22,9 +41,8 @@ export function stepTrain(
 ): TrainState {
   const traction = controls.brake > 0 || controls.doorsOpen
     ? 0
-    : controls.throttle * 0.8 / (1 + state.speed / 32);
-  const resistance = 0.012 + state.speed ** 2 * 0.000019;
-  const target = traction - controls.brake * SERVICE_DECELERATION - resistance - 9.81 * gradient;
+    : controls.throttle * fullTraction(state.speed);
+  const target = traction - controls.brake * SERVICE_DECELERATION - resistance(state.speed, gradient);
   const jerkStep = COMFORT_JERK * STEP;
   const acceleration = Math.min(
     state.acceleration + jerkStep,

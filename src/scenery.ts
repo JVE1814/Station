@@ -256,6 +256,7 @@ function createTerrain(
   data: WorldData,
   nearby: ReturnType<typeof routeIndex>,
   surface: MeshStandardMaterial,
+  ownsCell?: (east: number, worldZ: number) => boolean,
 ) {
   const group = new Group();
   group.name = 'Graded Copernicus DEM';
@@ -351,6 +352,9 @@ function createTerrain(
       };
       for (let row = tileRow; row < Math.min(rows, tileRow + tileCells); row++) {
         for (let col = tileCol; col < Math.min(columns, tileCol + tileCells); col++) {
+          const x = east + (col + 0.5) * spacing;
+          const z = -north + (row + 0.5) * spacing;
+          if (ownsCell && !ownsCell(x, z)) continue;
           const resolution = density(col, row);
           for (let y = 0; y < resolution; y++) {
             for (let x = 0; x < resolution; x++) {
@@ -364,6 +368,7 @@ function createTerrain(
           }
         }
       }
+      if (indices.length === 0) continue;
       const tile = mesh(vertices, indices, surface, colors, uv, normals);
       tile.geometry.computeBoundingSphere();
       group.add(tile);
@@ -1222,6 +1227,7 @@ function addForests(
   nearby: ReturnType<typeof routeIndex>,
   foliage: MeshStandardMaterial,
   distantFoliage: MeshLambertMaterial,
+  ownsCell?: (east: number, worldZ: number) => boolean,
 ) {
   type ForestTile = { near: Transform[]; far: Transform[]; trunks: Transform[] };
   const tileSize = 320;
@@ -1247,6 +1253,7 @@ function addForests(
         if (east > land.east + (land.width - 1) * land.spacing ||
           north > land.north || !inside([east, north], outline) || random() < 0.11) continue;
         if (holes.some((hole) => inside([east, north], hole))) continue;
+        if (ownsCell && !ownsCell(east, -north)) continue;
         const nearest = nearby(east, -north);
         if (nearest && nearest.distance < 8 && !nearest.span.tunnel) continue;
         const near = nearest && nearest.distance < 32;
@@ -1523,7 +1530,13 @@ export interface SceneryMaps {
   roofing?: Texture;
 }
 
-export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {}) {
+export interface SceneryPlacement {
+  ownsCell: (east: number, worldZ: number) => boolean;
+  gradeRail: Rail;
+  gradeSpans: TrackSpan[];
+}
+
+export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {}, placement?: SceneryPlacement) {
   const group = new Group();
   group.name = 'OpenStreetMap railway corridor';
   const ground = material(0xffffff, 0.95);
@@ -1571,15 +1584,15 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   const snow = [coatedBySnow(ground, 0.92), coatedBySnow(distantGround, 0.92), coatedBySnow(ballast, 0.57),
     coatedBySnow(foliage, 0.64, true), coatedBySnow(distantFoliage, 0.64, true),
     coatedBySnow(roofs, 0.87), coatedBySnow(concrete, 0.29)];
-  const nearby = routeIndex(rail, data.spans);
-  const terrain = createTerrain(data, nearby, ground);
+  const nearby = routeIndex(placement?.gradeRail ?? rail, placement?.gradeSpans ?? data.spans);
+  const terrain = createTerrain(data, nearby, ground, placement?.ownsCell);
   const terrainTiles = terrain.children.filter(tile => tile instanceof Mesh);
   group.add(terrain);
   addTrack(group, data, rail, ballast, concrete);
   addParallelTracks(group, data, nearby, ballast);
   addWater(group, data, water);
   addBuildings(group, data, windows, roofs, maps.siding);
-  addForests(group, data, nearby, foliage, distantFoliage);
+  addForests(group, data, nearby, foliage, distantFoliage, placement?.ownsCell);
   const grass = addTracksideGrass(group, data, rail, nearby);
   const setSignal = addSignals(group, data, nearby);
   const bulbs = addPlatforms(group, data, rail, concrete, fixtures);

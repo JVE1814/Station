@@ -7,6 +7,7 @@ export interface RouteTile {
   url: string;
   start: number;
   end: number;
+  bounds?: [west: number, south: number, east: number, north: number];
 }
 
 export interface NetworkRoute extends Omit<ServiceData, 'service'> {

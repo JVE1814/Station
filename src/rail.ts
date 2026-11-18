@@ -49,6 +49,20 @@ export class Rail {
     );
   }
 
+  window(start: number, end: number): Rail {
+    const first = Math.max(this.points[0].distance, start);
+    const last = Math.min(this.length, end);
+    const endpoint = (distance: number): RailPoint => {
+      const pose = this.position(distance);
+      return { distance, east: pose.x, height: pose.y, north: -pose.z };
+    };
+    return new Rail([
+      endpoint(first),
+      ...this.points.filter(point => point.distance > first && point.distance < last),
+      endpoint(last),
+    ]);
+  }
+
   gradient(distance: number): number {
     const start = this.position(distance - 2);
     const end = this.position(distance + 2);

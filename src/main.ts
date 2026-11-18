@@ -64,7 +64,7 @@ async function run(): Promise<void> {
     'grass', 'ballast', 'spruce', 'siding', 'roofing', 'dashboard', 'steel',
   ].map(loadMap));
   const maps = { grass, ballast, spruce, siding, roofing };
-  const scenery = pair ? createScenery(pair, rail, maps) : new SceneryStream(network!.tiles, maps, error => {
+  const scenery = pair ? createScenery(pair, rail, maps) : new SceneryStream(network!.tiles, maps, rail, data.spans, error => {
     element('notice').textContent = 'A scenery tile could not be loaded.';
     console.error(error);
   });
@@ -346,6 +346,7 @@ async function run(): Promise<void> {
       let upcoming = '';
       for (const feature of mappedSignals) {
         const chainage = feature.chainage!;
+        if (Math.abs(chainage - service.chainage()) > 2100 && chainage !== authority.boundary) continue;
         const direction = feature.facesService ? 1 : -1;
         const arriving = chainage === authority.boundary && feature.facesService;
         const displayed = service.blocks.aspect(arriving ? 'player' : 'next-train', chainage - direction * 0.01, direction);

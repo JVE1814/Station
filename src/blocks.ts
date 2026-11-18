@@ -14,6 +14,7 @@ export interface TrainFootprint {
 }
 
 interface Block {
+  indices: number[];
   occupied?: string;
   reserved?: string;
 }
@@ -25,6 +26,7 @@ export class BlockController {
   readonly boundaries: readonly number[];
   private readonly blocks: Block[];
   private readonly trains = new Map<string, TrainFootprint>();
+  private readonly locked = new Set<Block>();
 
   constructor(length: number, signalChainages: readonly number[]) {
     if (!Number.isFinite(length) || length <= 0) {
@@ -34,7 +36,7 @@ export class BlockController {
       throw new RangeError('Signal chainages must lie within the block alignment');
     }
     this.boundaries = Object.freeze([...new Set([0, ...signalChainages, length])].sort((a, b) => a - b));
-    this.blocks = Array.from({ length: this.boundaries.length - 1 }, () => ({}));
+    this.blocks = Array.from({ length: this.boundaries.length - 1 }, (_, index) => ({ indices: [index] }));
   }
 
   private blockAt(chainage: number): number {
@@ -57,8 +59,14 @@ export class BlockController {
     return (reserved === undefined || reserved === id) && (occupied === undefined || occupied === id);
   }
 
+  private updateLock(block: Block): void {
+    if (block.occupied !== undefined || block.reserved !== undefined) this.locked.add(block);
+    else this.locked.delete(block);
+  }
+
   /** Tie repeated use of one physical track section to the same block lock. */
   protectSharedTrack(ranges: readonly { start: number; end: number; osmWay: number; direction?: string }[]): void {
+    if (this.locked.size) throw new Error('Shared track must be defined before the first train enters');
     const firstUse = new Map<number, { start: number; end: number; direction?: string }>();
     for (const range of ranges) {
       const previous = firstUse.get(range.osmWay);
@@ -75,12 +83,15 @@ export class BlockController {
         if (shared.has(this.blocks[index])) this.blocks[index] = lock;
       }
     }
+    for (const block of new Set(this.blocks)) block.indices.length = 0;
+    this.blocks.forEach((block, index) => block.indices.push(index));
   }
 
   remove(id: string): void {
-    for (const block of this.blocks) {
+    for (const block of this.locked) {
       if (block.occupied === id) delete block.occupied;
       if (block.reserved === id) delete block.reserved;
+      this.updateLock(block);
     }
     this.trains.delete(id);
   }
@@ -91,13 +102,20 @@ export class BlockController {
       throw new RangeError('Invalid block index');
     }
     if (indices.some(index => !this.available(index, id))) return false;
-    for (const index of indices) this.blocks[index].reserved = id;
+    for (const index of indices) {
+      const block = this.blocks[index];
+      block.reserved = id;
+      this.updateLock(block);
+    }
     return true;
   }
 
   /** Cancel a reservation. Occupancy remains protected until the train moves clear. */
   release(id: string, index: number): void {
-    if (this.blocks[index]?.reserved === id) delete this.blocks[index].reserved;
+    const block = this.blocks[index];
+    if (block?.reserved !== id) return;
+    delete block.reserved;
+    this.updateLock(block);
   }
 
   /** Move the full train atomically, checking the swept path as well as its new footprint. */
@@ -119,6 +137,7 @@ export class BlockController {
         if (block.occupied === id) delete block.occupied;
         if (block.reserved === id) delete block.reserved;
       }
+      this.updateLock(block);
     }
     this.trains.set(id, { id, front, rear });
     return true;
@@ -138,9 +157,13 @@ export class BlockController {
 
     const entry = (index: number) => this.boundaries[index + (direction === 1 ? 0 : 1)];
     const boundary = entry(adjacent);
-    let blocked = adjacent;
-    while (blocked >= 0 && blocked < this.blocks.length && this.available(blocked, id)) {
-      blocked += direction;
+    let blocked = direction === 1 ? this.blocks.length : -1;
+    for (const lock of this.locked) {
+      if ((lock.occupied === undefined || lock.occupied === id)
+        && (lock.reserved === undefined || lock.reserved === id)) continue;
+      for (const index of lock.indices) {
+        if ((index - adjacent) * direction >= 0 && (blocked - index) * direction > 0) blocked = index;
+      }
     }
     const stopDistance = blocked >= 0 && blocked < this.blocks.length
       ? Math.max(0, Math.min(this.boundaries.at(-1)!, entry(blocked) - SIGNAL_MARGIN * direction))

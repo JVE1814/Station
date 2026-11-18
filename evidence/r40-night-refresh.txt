@@ -1,0 +1,5 @@
+Trackbed terrain audit: 1302 samples, maximum gap 0.303 m, missing 0.
+Captured cab · night
+Captured chase · night
+Captured map · night
+Browser console errors: 0

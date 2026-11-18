@@ -14,7 +14,7 @@ The [latest capture log](r40-final-captures.txt) records all nine views, zero co
 
 The [independent station audit](station-membership.txt) checks each displayed name and its coordinates against the pinned OSM extract. It traces nearby stations excluded from the simulation to their actual track. [Reproduction and source digests](station-membership.md)
 
-The browser drive captured the [river bridge](bridge.png) in chase view and the [Bulken tunnel](tunnel.png) from the cab.
+The [manual Chromium run](manual-drive.txt) departed Seimsgrend, switched through all three cameras and scored 74/100 after stopping 2.1 m from Bulken’s marker. It captured the [river bridge](bridge.png), the [Bulken tunnel](tunnel.png), and the [arrival at Bulken](station.png) at 1080p.
 
 The [data rebuild output](data-rebuild.txt) records a full run of `npm run data` and the SHA-256 comparison of its public assets with the committed copies.
 

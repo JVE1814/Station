@@ -118,7 +118,11 @@ try {
     }
 
     if (captures) {
+      await page.waitForFunction(() => document.getElementById('world').dataset.structure !== 'tunnel', null,
+        { timeout: 600_000, polling: 150 });
       await activate('pause');
+      const marker = await page.locator('#world').getAttribute('data-chainage');
+      console.log(`Capture location: R40 route metre ${marker}.`);
       await mkdir('evidence', { recursive: true });
       const cdp = await page.context().newCDPSession(page);
       const conditions = requestedCondition ? [requestedCondition] : ['day', 'night', 'snow'];

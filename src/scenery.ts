@@ -702,6 +702,9 @@ function addTrack(
   }
 
   const limited: { mesh: InstancedMesh; radius: number }[] = [];
+  const detailRange = new Map([
+    [ties, 290], [fasteners, 180], [conductors, 310], [porcelain, 190],
+  ]);
   for (const [surface, entries] of [
     [sleeper, ties], [clips, fasteners], [support, posts], [wire, conductors],
     [insulator, porcelain], [concrete, piers], [steel, bridgeDetail],
@@ -713,9 +716,8 @@ function addTrack(
       if (entries === piers) detail.name = 'Bridge pier';
       if (entries === bridgeDetail) detail.name = 'Bridge railing';
       detail.castShadow = entries !== fasteners && entries !== conductors;
-      if (entries === ties || entries === fasteners) {
-        limited.push({ mesh: detail, radius: entries === ties ? 520 : 220 });
-      }
+      const radius = detailRange.get(entries);
+      if (radius !== undefined) limited.push({ mesh: detail, radius });
       group.add(detail);
     }
   }
@@ -1608,12 +1610,18 @@ function addForests(
   const silhouettes = distantSpruceGeometry();
   const trunk = new CylinderGeometry(0.3, 0.6, 1, 6);
   const bark = material(0x504234);
+  const nearDetails: { spruce: InstancedMesh; trunks: InstancedMesh; distant: InstancedMesh }[] = [];
   for (const tile of tiles.values()) {
     if (tile.near.length) {
       const spruce = aggregate(sprays, foliage, tile.near);
       spruce.name = 'Trackside spruce';
       spruce.castShadow = true;
-      group.add(spruce, aggregate(trunk, bark, tile.trunks));
+      const trunks = aggregate(trunk, bark, tile.trunks);
+      const distant = aggregate(silhouettes, distantFoliage, tile.near);
+      distant.name = 'Trackside spruce canopy';
+      distant.visible = false;
+      nearDetails.push({ spruce, trunks, distant });
+      group.add(spruce, trunks, distant);
     }
     if (tile.far.length) {
       const canopy = aggregate(silhouettes, distantFoliage, tile.far);
@@ -1621,6 +1629,14 @@ function addForests(
       group.add(canopy);
     }
   }
+  return (camera: Vector3) => {
+    for (const { spruce, trunks, distant } of nearDetails) {
+      const bounds = spruce.boundingSphere;
+      const detailed = bounds ? camera.distanceToSquared(bounds.center) <= (bounds.radius + 175) ** 2 : true;
+      spruce.visible = trunks.visible = detailed;
+      distant.visible = !detailed;
+    }
+  };
 }
 
 type SignalAspect = 'clear' | 'approach' | 'stop';
@@ -1925,7 +1941,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   addParallelTracks(group, data, nearby, ballast);
   addWater(group, data, water);
   addBuildings(group, data, windows, roofs, maps.siding, nearby);
-  addForests(group, data, nearby, foliage, distantFoliage, placement?.ownsCell);
+  const applyForestDetail = addForests(group, data, nearby, foliage, distantFoliage, placement?.ownsCell);
   const grass = addTracksideGrass(group, data, rail, nearby);
   const setSignal = addSignals(group, data, nearby);
   const bulbs = addPlatforms(group, data, rail, concrete, fixtures, nearby);
@@ -1960,6 +1976,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   const update = (seconds: number, camera: Vector3) => {
     grass.applyDistance(camera);
     applyTrackDetail(camera);
+    applyForestDetail(camera);
     for (const tile of terrainTiles) {
       const bounds = tile.geometry.boundingBox;
       const detailed = bounds && bounds.distanceToPoint(camera) <= 210;

@@ -1,0 +1,21 @@
+
+> station@0.1.0 drive:browser
+> node scripts/drive-browser.mjs
+
+Manual departure · 8 km/h, 2735 m to Bulken
+Switched to chase camera
+Switched to bird’s-eye camera
+Returned to cab camera
+Passed route metre 506 at 62 km/h
+Passed route metre 1001 at 61 km/h
+Passed route metre 1505 at 62 km/h
+Captured bridge at 1080p
+Captured tunnel at 1080p
+Passed route metre 2005 at 60 km/h
+Passed route metre 2503 at 45 km/h
+Bulken approach · 112 m remaining, 30 km/h
+Bulken approach · 23 m remaining, 9 km/h
+Bulken approach · 5 m remaining, 6 km/h
+Score 74/100 · 2.1 m stopping error · 34 s late
+Captured station at 1080p
+Manual browser run completed with zero console errors.

@@ -82,3 +82,9 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - The second cab sample recorded 12.48 ms on the SwiftShader CPU proxy, despite reducing the last frame to 274 draws. The chase view measured 6.63 ms. A separate phase trace found most of the cab work inside the WebGL render call.
 - Instanced moving door components and merged rigid opaque stock casters for the depth pass. The tests check both door sides, texture and shadow flags, and retained geometry. Added a wider cached shadow view for the cab and high map, kept live stock shadows where the train is visible, and draw opaque cockpit depth before scenery.
 - The fresh 1080p check will run on the latest build after the driving and earlier browser sessions close.
+- Added distance-based scenery detail for high viewpoints. The detailed trees, fasteners, wires and insulators remain available close to the route and at platform zoom.
+
+## Manual arrival
+
+- Drove the R40 in Chromium with the in-game autopilot off and switched through cab, chase and bird’s-eye view. After braking at Bulken and opening the doors, the HUD reported 74/100, a 2.1 m stopping error and arrival 34 seconds late.
+- Captured the bridge, tunnel and station at 1920 × 1080 in the same service. The run finished with zero browser console errors.

@@ -25,7 +25,11 @@ try {
     const query = new URLSearchParams({line:'R40',quality:'high',audit:'trackbed'});
     if (hero) query.set('hero',hero);
     await page.goto(new URL('?' + query, origin).href,{timeout:180000});
-    await page.waitForFunction(() => document.getElementById('world').dataset.stage === 'running',null,{timeout:180000,polling:250});
+    const ready = await page.waitForFunction(() => {
+      const stage = document.getElementById('world').dataset.stage;
+      return stage === 'running' || stage === 'failed' ? stage : false;
+    }, null, {timeout:600000,polling:250});
+    assert.equal(await ready.jsonValue(), 'running', 'R40 must start offline');
   };
   await launch('02-evanger-cab');
   const renderer = await page.locator('#world').getAttribute('data-renderer');
@@ -38,9 +42,20 @@ try {
     await page.waitForFunction(() => Number(document.getElementById('speed').textContent) >= 15,null,{timeout:120000});
   }
   for (const [index, [view, hero]] of views.entries()) {
-    if (software && index) await launch(hero);
+    let previousFrame;
+    if (software && index) {
+      previousFrame = await page.evaluate(id => {
+        const frame = document.getElementById('world').dataset.captureFrame;
+        window.dispatchEvent(new CustomEvent('station-capture', {detail: {id, look:'golden'}}));
+        return frame;
+      }, hero);
+      assert.ok(previousFrame, 'The first workload capture rendered a frame');
+    }
     if (!software) await page.keyboard.press(String(index + 1));
-    await page.waitForFunction(selected => document.getElementById('world').dataset.view === selected,view,{timeout:120000,polling:250});
+    await page.waitForFunction(({view, previousFrame}) => {
+      const state = document.getElementById('world').dataset;
+      return state.view === view && (!previousFrame || (state.stage === 'running' && state.captureFrame !== previousFrame));
+    }, {view, previousFrame}, {timeout:360000,polling:250});
     const info = await page.locator('#world').evaluate(el => ({
       calls: Number(el.dataset.drawCalls), triangles: Number(el.dataset.triangles)
     }));
@@ -64,6 +79,36 @@ try {
   }
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);
+
+  const layout = await browser.newPage({viewport:{width:960, height:600}});
+  await layout.route('**/assets/*.js', route => route.fulfill({contentType:'text/javascript', body:''}));
+  await layout.goto(origin.href);
+  for (const width of [960, 720]) {
+    await layout.setViewportSize({width, height:600});
+    const result = await layout.evaluate(() => {
+      document.body.classList.add('showpiece');
+      const card = document.getElementById('trip-result');
+      card.hidden = false;
+      for (const [id, value] of Object.entries({
+        'result-title': 'Seimsgrend', 'result-score': '83 / 100', 'result-timing': '89 s late',
+        'result-position': '1.1 m from marker', 'result-passengers': '10 boarded · 7 alighted',
+        'brake-cue': 'Within stop zone · D to open doors',
+      })) {
+        const element = document.getElementById(id);
+        element.hidden = false;
+        element.textContent = value;
+      }
+      for (const button of document.querySelectorAll('.auxiliary button')) button.hidden = false;
+      const button = document.getElementById('hide-result');
+      const bounds = button.getBoundingClientRect();
+      const front = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+      return card.getBoundingClientRect().bottom < document.querySelector('.bottom-bar').getBoundingClientRect().top
+        && button.contains(front);
+    });
+    assert.ok(result, `Stop results must clear the controls at ${width}×600`);
+  }
+  await layout.close();
+  console.log('Stop result dismissal is visible and clickable at 960×600 and 720×600.');
 } finally {
   await browser.close();
   server.httpServer.close();

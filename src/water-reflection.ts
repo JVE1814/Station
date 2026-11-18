@@ -10,13 +10,25 @@ export function decorrelateWaterNormals(material: MeshStandardMaterial): void {
   const cache = material.customProgramCacheKey;
   material.onBeforeCompile = (shader, renderer) => {
     before.call(material, shader, renderer);
-    shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_maps>', `
+    shader.fragmentShader = shader.fragmentShader.replace('#include <normalmap_pars_fragment>', `
+      #include <normalmap_pars_fragment>
+      #define MAPPED_LAKE_RIPPLES
       #if defined(USE_NORMALMAP_TANGENTSPACE)
-        vec2 firstWave = texture2D(normalMap, vNormalMapUv).xy * 2.0 - 1.0;
-        mat2 rotation = mat2(0.742, -0.670, 0.670, 0.742);
-        vec2 secondWave = texture2D(normalMap, rotation * vNormalMapUv * 1.719 + vec2(0.21, 0.48)).xy * 2.0 - 1.0;
-        vec2 wave = (firstWave * 0.69 + (transpose(rotation) * secondWave) * 0.47) * normalScale;
-        normal = normalize(tbn * vec3(wave, 1.0));
+        vec2 lakeRipples(vec2 basin) {
+          vec2 windZones = vec2(sin(dot(basin, vec2(.28,-.21))),
+            sin(dot(basin, vec2(.12,.36)) + .40 * sin(dot(basin, vec2(.19,.11)))));
+          mat2 rotation = mat2(.742,-.670,.670,.742);
+          vec2 firstUv = basin * vec2(.64,1.06) + .23 * windZones;
+          vec2 secondUv = rotation * basin * 1.379 + vec2(.21,.48) + .15 * windZones.yx;
+          vec2 firstWave = texture2D(normalMap, firstUv).xy * 2.0 - 1.0;
+          vec2 secondWave = texture2D(normalMap, secondUv).xy * 2.0 - 1.0;
+          float exposure = .75 + .25 * dot(windZones, vec2(.65,.35));
+          return (firstWave * .64 + (transpose(rotation) * secondWave) * .30) * exposure;
+        }
+      #endif
+    `).replace('#include <normal_fragment_maps>', `
+      #if defined(USE_NORMALMAP_TANGENTSPACE)
+        normal = normalize(tbn * vec3(lakeRipples(vNormalMapUv) * normalScale, 1.0));
       #else
         #include <normal_fragment_maps>
       #endif
@@ -114,9 +126,8 @@ export class WaterReflection {
           float planeBlend = 1.0 - smoothstep(0.6, 9.0, abs(vLakeHeight - lakePlane));
           if (lakeReflectivity > 0.0 && planeBlend > 0.0 && vLakeReflection.w > 0.001) {
             vec2 waveOffset = vec2(0.0);
-            #if defined(USE_NORMALMAP_TANGENTSPACE)
-              vec2 ripples = texture2D(normalMap, vNormalMapUv * vec2(1.13, 3.77) + vec2(0.2, 0.45)).xy * 2.0 - 1.0;
-              waveOffset = ripples * vec2(.023, .007);
+            #if defined(USE_NORMALMAP_TANGENTSPACE) && defined(MAPPED_LAKE_RIPPLES)
+              waveOffset = lakeRipples(vNormalMapUv) * vec2(.022, .010);
             #endif
             vec2 planarUv = vLakeReflection.xy / vLakeReflection.w + normal.xy * 0.006 + waveOffset;
             float edge = min(min(planarUv.x, planarUv.y), min(1.0 - planarUv.x, 1.0 - planarUv.y));
@@ -130,7 +141,7 @@ export class WaterReflection {
               + texture2D(lakeMirror, planarUv - vec2(spread,.0008)).rgb) * .23;
             reflectedValley *= vec3(.63, .74, .83);
             #ifdef WATER_BANK_FIELD
-              fresnel *= mix(.73, 1.0, smoothstep(.04, .62, waterDepth));
+              fresnel *= mix(.79, 1.0, smoothstep(.025, .29, waterDepth));
             #endif
             outgoingLight = mix(outgoingLight, reflectedValley,
               lakeReflectivity * fresnel * insideImage * planeBlend);

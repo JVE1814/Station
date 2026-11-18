@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Layers, Matrix4, Texture, Vector3 } from 'three';
+import { Layers, Matrix4, Raycaster, Texture, Vector3 } from 'three';
 import { createCab, createTrain, ROLLING_STOCK_SHADOW_LAYER } from '../src/rolling-stock.ts';
 
 test('instanced passenger doors retain their material maps and cull-safe travel', () => {
@@ -126,4 +126,50 @@ test('showpiece windscreen draws only in weather and parks both wipers in clear 
   update({ ...state, weather: 'clear' });
   assert.equal(pane.visible, false);
   assert.ok(wipers.every((item, index) => item.quaternion.angleTo(parked[index]) < 1e-7));
+});
+
+test('R40 control wells have physical depth and retain lever travel and the driver sightline', (t) => {
+  const originalDocument = globalThis.document;
+  t.after(() => { globalThis.document = originalDocument; });
+  const context = new Proxy({}, { get: (_target, key) => key === 'createRadialGradient'
+    ? () => ({ addColorStop() {} }) : () => {} });
+  globalThis.document = { createElement: () => ({ getContext: () => context }) };
+  const { group, eye, update } = createCab(new Texture(), true);
+  const top = group.getObjectByName('Cab console with recessed controls');
+  const mount = top.parent;
+  group.updateMatrixWorld(true);
+  const downward = new Vector3(0, -1, 0).transformDirection(mount.matrixWorld);
+  const fromAbove = (x, z, surface) => {
+    const ray = new Raycaster(mount.localToWorld(new Vector3(x, 0.25, z)), downward);
+    return ray.intersectObject(surface, false).map(hit => mount.worldToLocal(hit.point).y);
+  };
+  const flatTop = fromAbove(0, 0, top)[0];
+  assert.ok(flatTop > 0.028 && flatTop < 0.042);
+  for (const [x, z] of [[-0.73, -0.105], [0.26, 0.025], [0.76, 0.025]]) {
+    assert.deepEqual(fromAbove(x, z, top), []);
+  }
+  const mechanism = mount.children.find(item => item.material?.name === 'Cab console recessed mechanism');
+  assert.ok(fromAbove(0.26, 0.025, mechanism)[0] < flatTop - 0.01);
+  const trim = mount.children.find(item => item.material?.name === 'Cab console anodized control trim').material;
+  assert.ok(top.material.bumpMap && top.material.bumpScale > 0);
+  assert.ok(trim.metalness > top.material.metalness && trim.roughness < top.material.roughness);
+
+  const [power, brake] = ['Cab power lever', 'Cab brake lever'].map(name => group.getObjectByName(name));
+  const state = { speed: 17, throttle: 0, brake: 0, doorsOpen: false, night: false };
+  update(state);
+  const initial = [power.rotation.x, brake.rotation.x];
+  const lamps = mount.children.filter(item => item.material?.clearcoat > 0).map(item => item.material);
+  const closed = lamps.map(material => material.emissiveIntensity);
+  update({ ...state, throttle: 1, brake: 1, doorsOpen: true });
+  assert.ok(power.rotation.x < initial[0] - 1);
+  assert.ok(brake.rotation.x > initial[1] + 1);
+  assert.equal(lamps.length, 2);
+  assert.notDeepEqual(lamps.map(material => material.emissiveIntensity), closed);
+  const dials = group.getObjectByName('Cab instruments').children.filter(item => item.isGroup);
+  assert.equal(dials.length, 4);
+  assert.ok(dials.every(item => item.children.find(mesh => mesh.material?.emissiveMap)));
+  assert.deepEqual(eye.toArray(), [0.38, 2.70, -9.33]);
+
+  const intercity = createCab(new Texture(), false);
+  assert.equal(intercity.group.getObjectByName(top.name), undefined);
 });

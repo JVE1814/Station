@@ -33,8 +33,8 @@ function distanceToBank(mask: Uint8ClampedArray, width: number, height: number, 
 export function createShorelineField(terrain: TerrainData, water: readonly WorldFeature[]) {
   const across = Math.max(1, (terrain.width - 1) * terrain.spacing);
   const along = Math.max(1, (terrain.height - 1) * terrain.spacing);
-  const width = Math.min(1024, Math.max(24, Math.ceil(across / 6)));
-  const height = Math.min(1024, Math.max(24, Math.ceil(along / 6)));
+  const width = Math.min(1280, Math.max(24, Math.ceil(across / 3.5)));
+  const height = Math.min(1280, Math.max(24, Math.ceil(along / 3.5)));
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -89,9 +89,9 @@ export function applyWaterBanks(material: MeshStandardMaterial, field: ReturnTyp
       .replace('#include <color_fragment>', `#include <color_fragment>
         vec2 waterBankUv = (vWaterBank - waterBankExtent.xy) / waterBankExtent.zw;
         float waterDepth = texture2D(waterBankField, waterBankUv).r;
-        float edgeTint = (1.0 - smoothstep(.06, .70, waterDepth)) * .73;
+        float edgeTint = (1.0 - smoothstep(.035, .26, waterDepth)) * .61;
         diffuseColor.rgb *= mix(waterDeepColor, waterShallowColor, edgeTint);
-        diffuseColor.a *= mix(.05, 1.0, smoothstep(.01, .30, waterDepth));
+        diffuseColor.a *= mix(.36, 1.0, smoothstep(.015, .18, waterDepth));
       `);
   };
   material.customProgramCacheKey = () => `${cache.call(material)}:mapped-banks`;

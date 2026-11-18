@@ -35,7 +35,8 @@ export class ShowpiecePanel {
       : !service.nextStop ? 'Service complete · R to retry'
       : service.canOpenDoors && !tutorial && inStopZone ? 'Within stop zone · D to open doors'
       : guidance.brakeNotch ? `Brake ${guidance.brakeNotch} · Aim for ${Math.round(guidance.recommendedSpeed)} km/h`
-      : `${guidance.powerNotch ? `Power ${guidance.powerNotch}` : 'Coast'} · Aim for ${Math.round(guidance.recommendedSpeed)} km/h`;
+      : guidance.powerNotch ? `Power ${guidance.powerNotch} · Aim for ${Math.round(guidance.recommendedSpeed)} km/h`
+      : `Coast · Stay under ${Math.round(guidance.recommendedSpeed)} km/h`;
     guide.dataset.brake = String(guidance.brakeNotch > 0 && service.state.speed > 1);
     number('grip').textContent = `${surfaceNames[weather]} · ${service.passengersAboard} aboard`;
     if (tutorial) {
@@ -66,32 +67,35 @@ export class StoppingMarker {
 
   constructor() {
     this.label.center.set(.5, 0);
-    this.label.scale.set(2.55, 1.12, 1);
     this.group.add(this.label);
   }
 
   update(rail: Rail, station: Station | undefined, chainage: number, enabled: boolean): void {
-    const active = enabled && Boolean(station && Math.abs(station.stopDistance - chainage) < 300);
-    this.group.visible = active;
-    if (!station || !active || station === this.station) return;
+    const distance = station ? Math.abs(station.stopDistance - chainage) : Infinity;
+    this.group.visible = enabled && distance < 300;
+    if (!station || !this.group.visible) return;
+    const size = 1 + Math.min(.7, distance / 94);
+    this.label.scale.set(3.12 * size, 1.36 * size, 1);
+    if (station === this.station) return;
     this.station = station;
     const canvas = document.createElement('canvas');
     canvas.width = 384;
     canvas.height = 160;
     const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#12212c';
-    ctx.fillRect(18, 4, 348, 113);
-    ctx.strokeStyle = '#f6d69a';
-    ctx.lineWidth = 6;
-    ctx.strokeRect(21, 7, 342, 107);
-    ctx.fillStyle = '#fbefd8';
+    ctx.fillStyle = '#f3bd59';
+    ctx.fillRect(12, 2, 360, 123);
+    ctx.strokeStyle = '#2d271f';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(18, 8, 348, 111);
+    ctx.fillStyle = '#232520';
     ctx.textAlign = 'center';
-    ctx.font = 'bold 44px system-ui';
-    ctx.fillText('STOP', 192, 55);
-    ctx.font = '24px system-ui';
-    ctx.fillText(station.name, 192, 91, 310);
+    ctx.font = 'bold 75px system-ui';
+    ctx.fillText('STOP', 192, 75);
+    ctx.font = '28px system-ui';
+    ctx.fillText(station.name, 192, 107, 310);
+    ctx.fillStyle = '#f3bd59';
     ctx.beginPath();
-    ctx.moveTo(175, 114); ctx.lineTo(192, 151); ctx.lineTo(209, 114); ctx.fill();
+    ctx.moveTo(164, 124); ctx.lineTo(192, 156); ctx.lineTo(220, 124); ctx.fill();
     this.label.material.map?.dispose();
     this.label.material.map = new CanvasTexture(canvas);
     this.label.material.map.colorSpace = SRGBColorSpace;

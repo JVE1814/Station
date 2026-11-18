@@ -20,17 +20,20 @@ import {
   Raycaster,
   RepeatWrapping,
   ShapeUtils,
+  SpotLight,
   SRGBColorSpace,
+  Uint8BufferAttribute,
   Vector2,
   Vector3,
 } from 'three';
 import type { Intersection, Material, Texture } from 'three';
 import type { Rail } from './rail';
-import { gabledRoof } from './roof.ts';
+import { gabledRoof, roofTint } from './roof.ts';
 import type { GabledRoof } from './roof.ts';
 import { blendExposedRock, civilTexture, dustHighPeaks } from './scenery-materials.ts';
 import { applyWaterBanks, createShorelineField } from './lake-surface.ts';
 import { buildRiverSurface } from './river-surface.ts';
+import type { RiverTerrainCorrection } from './river-surface.ts';
 import { createVossStreets, sampleVossStreetTerrain } from './voss-streets.ts';
 import type { VossStreetData } from './voss-streets.ts';
 import { decorrelateWaterNormals } from './water-reflection.ts';
@@ -40,6 +43,7 @@ import type { VegetationOptions } from './vegetation.ts';
 import { createPassengers } from './passengers.ts';
 import type { PassengerPlatform } from './passengers.ts';
 import { groundHeight, type LocalPoint, type TrackSpan, type WorldData } from './world-data.ts';
+import { dressTunnelCut, tunnelCutField, tunnelWingStone } from './tunnel-cut.ts';
 
 type Weather = 'clear' | 'rain' | 'snow';
 type Transform = {
@@ -370,6 +374,7 @@ function createTerrain(
   paint: TerrainPaint,
   exposedRock: boolean,
   ownsCell?: (east: number, worldZ: number) => boolean,
+  cutField?: ReturnType<typeof tunnelCutField>,
 ) {
   const group = new Group();
   group.name = 'Graded Copernicus DEM';
@@ -402,6 +407,7 @@ function createTerrain(
       const colors: number[] = [];
       const normals: number[] = [];
       const rockExposure: number[] = [];
+      const cut: number[] = [];
       const uv: number[] = [];
       const cached = new Map<number, number>();
       const vertex = (col: number, row: number, x: number, y: number, resolution: number) => {
@@ -438,6 +444,7 @@ function createTerrain(
         const slope = 2 * (Math.abs(dx) + Math.abs(dz));
         const exposure = paint(worldX, worldZ, slope, soil);
         if (exposedRock) rockExposure.push(exposure);
+        cutField?.(worldX, h, worldZ, dx, dz, cut);
         colors.push(soil.r, soil.g, soil.b);
         cached.set(key, index);
         return index;
@@ -480,6 +487,7 @@ function createTerrain(
       if (indices.length === 0) continue;
       const tile = mesh(vertices, indices, surface, colors, uv, normals);
       if (exposedRock) tile.geometry.setAttribute('rockExposure', new Float32BufferAttribute(rockExposure, 1));
+      if (cutField) tile.geometry.setAttribute('tunnelCut', new Uint8BufferAttribute(cut, 2, true));
       tile.geometry.computeBoundingSphere();
       tile.geometry.computeBoundingBox();
       group.add(tile);
@@ -547,6 +555,7 @@ function addPortalBackfill(
   coverMaterial: MeshStandardMaterial,
   frontMaterial: MeshStandardMaterial,
   paint: TerrainPaint,
+  cutField?: ReturnType<typeof tunnelCutField>,
 ) {
   const offsets = [-9, -7.6, -6.2, -4.75, -4.45, -3.55, -2.35, -1.2, 0, 1.2, 2.35, 3.55, 4.45, 4.75, 6.2, 7.6, 9];
   const direction = mouth === span.start ? 1 : -1;
@@ -556,6 +565,7 @@ function addPortalBackfill(
   const vertices: number[] = [];
   const colors: number[] = [];
   const rockExposure: number[] = [];
+  const cut: number[] = [];
   const uv: number[] = [];
   const indices: number[] = [];
   const faceVertices: number[] = [];
@@ -582,8 +592,10 @@ function addPortalBackfill(
       const shaped = natural + Math.max(0, rockLip - natural) * lateral + 0.024;
       vertices.push(point.x, shaped, point.z);
       uv.push(point.x / 9, point.z / 9);
-      const slope = 2 * (Math.abs(gradedHeight(data, nearby, point.x + 3, point.z) - gradedHeight(data, nearby, point.x - 3, point.z))
-        + Math.abs(gradedHeight(data, nearby, point.x, point.z + 3) - gradedHeight(data, nearby, point.x, point.z - 3)));
+      const dx = gradedHeight(data, nearby, point.x + 3, point.z) - gradedHeight(data, nearby, point.x - 3, point.z);
+      const dz = gradedHeight(data, nearby, point.x, point.z + 3) - gradedHeight(data, nearby, point.x, point.z - 3);
+      const slope = 2 * (Math.abs(dx) + Math.abs(dz));
+      cutField?.(point.x, shaped, point.z, dx, dz, cut);
       const exposure = paint(point.x, point.z, slope, tint);
       const freshCut = Math.max(0, 1 - row / rows * 2.4) * lateral * 0.75;
       rockExposure.push(Math.max(exposure, freshCut));
@@ -607,6 +619,7 @@ function addPortalBackfill(
   }
   const fill = mesh(vertices, indices, coverMaterial, colors, uv);
   fill.geometry.setAttribute('rockExposure', new Float32BufferAttribute(rockExposure, 1));
+  if (cutField) fill.geometry.setAttribute('tunnelCut', new Uint8BufferAttribute(cut, 2, true));
   const frontage = mesh(faceVertices, faceIndices, frontMaterial, undefined, faceUv);
   fill.name = frontage.name = 'Tunnel portal';
   fill.castShadow = frontage.castShadow = true;
@@ -715,7 +728,7 @@ function addTrack(
   ballast: MeshStandardMaterial,
   concrete: MeshStandardMaterial,
   nearby: ReturnType<typeof routeIndex>,
-  portalTerrain?: { surface: MeshStandardMaterial; paint: TerrainPaint },
+  portalTerrain?: { surface: MeshStandardMaterial; paint: TerrainPaint; cut?: ReturnType<typeof tunnelCutField> },
 ) {
   const full = { start: 0, end: rail.length };
   const steel = material(0x555d61, 0.32, 0.82);
@@ -851,6 +864,7 @@ function addTrack(
   const pierSurface = portalTerrain && bedSpans.some(span => span.bridge) ? bridgePierMaterial() : concrete;
   tunnelSurface.side = DoubleSide;
   lining.side = DoubleSide;
+  const portalWings = archStone !== lining ? tunnelWingStone(lining) : lining;
   const bridgeDetail: Transform[] = [];
   for (const span of bedSpans) {
     if (!span.bridge && !span.tunnel) continue;
@@ -926,7 +940,7 @@ function addTrack(
         frontage.castShadow = Boolean(portalTerrain);
         group.add(portal, frontage);
         if (portalTerrain) {
-          addPortalBackfill(group, data, rail, nearby, span, end, portalTerrain.surface, lining, portalTerrain.paint);
+          addPortalBackfill(group, data, rail, nearby, span, end, portalTerrain.surface, portalWings, portalTerrain.paint, portalTerrain.cut);
         }
       }
     }
@@ -1217,8 +1231,33 @@ function isWaitingShelter(feature: WorldData['features'][number]) {
     && ['public_transport', undefined].includes(feature.tags.shelter_type);
 }
 
+export function sharedShelterEntrance(outline: LocalPoint[], platforms: PassengerPlatform[]) {
+  const center = centerOf(outline);
+  const matches = (point: LocalPoint, candidate: LocalPoint) =>
+    Math.hypot(point[0] - candidate[0], point[1] - candidate[1]) < 0.015;
+  let entrance: { index: number; deck: PassengerPlatform; width: number } | undefined;
+  for (let index = 0; index < outline.length; index++) {
+    const a = outline[index];
+    const b = outline[(index + 1) % outline.length];
+    const width = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (width < 1.4 || (entrance && width <= entrance.width)) continue;
+    const mid: LocalPoint = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const dx = (a[1] - b[1]) / width;
+    const dy = (b[0] - a[0]) / width;
+    const sign = (center[0] - mid[0]) * dx + (center[1] - mid[1]) * dy > 0 ? -1 : 1;
+    const deck = platforms.find(platform => platform.outline.some((point, i, points) => {
+      const next = points[(i + 1) % points.length];
+      return (matches(a, point) && matches(b, next)) || (matches(a, next) && matches(b, point));
+    }) && [0.12, 0.6].every(setback => inside(
+      [mid[0] + dx * sign * setback, mid[1] + dy * sign * setback], platform.outline,
+    )));
+    if (deck) entrance = { index, deck, width };
+  }
+  return entrance;
+}
+
 function addWaitingShelters(
-  group: Group, data: WorldData, platforms: PassengerPlatform[], siding?: Texture,
+  group: Group, data: WorldData, platforms: PassengerPlatform[], nearby: ReturnType<typeof routeIndex>, siding?: Texture,
 ) {
   const timber = material(0x915e47, 0.85);
   timber.map = timber.bumpMap = siding ?? null;
@@ -1236,7 +1275,11 @@ function addWaitingShelters(
     if (outline.length < 3) continue;
     const footprint = outline.map(point => coordinate(point, 0));
     const edges = footprint.map((point, index) => footprint[(index + 1) % footprint.length].clone().sub(point));
-    const along = edges.reduce((longest, edge) => edge.lengthSq() > longest.lengthSq() ? edge : longest).normalize();
+    // Where mapping shares an edge, the opening joins that deck directly. Testing only
+    // the long sides misses shelters whose short end is the opening.
+    const entrance = sharedShelterEntrance(outline, platforms);
+    const along = (entrance ? edges[entrance.index]
+      : edges.reduce((longest, edge) => edge.lengthSq() > longest.lengthSq() ? edge : longest)).normalize();
     if (!along.lengthSq()) continue;
     const facing = new Vector3(-along.z, 0, along.x);
     const bounds = (axis: Vector3) => {
@@ -1254,16 +1297,19 @@ function addWaitingShelters(
     const positiveDeck = frontDeck(1);
     const negativeDeck = frontDeck(-1);
     const center = locate(mid, (depth.min + depth.max) / 2);
-    const farSide = negativeDeck && !positiveDeck;
+    const entrancePoint = entrance
+      ? footprint[entrance.index].clone().lerp(footprint[(entrance.index + 1) % footprint.length], 0.5)
+      : undefined;
+    const farSide = entrancePoint ? entrancePoint.clone().sub(center).dot(facing) < 0 : negativeDeck && !positiveDeck;
     if (farSide) {
       facing.negate();
       depth = bounds(facing);
     }
-    const deck = (farSide ? negativeDeck : positiveDeck);
+    const deck = entrance?.deck ?? (farSide ? negativeDeck : positiveDeck);
     const width = span.max - span.min;
     const length = depth.max - depth.min;
     if (width < 1.4 || length < 0.85) continue;
-    const threshold = locate(mid, depth.max + 0.05);
+    const threshold = entrancePoint ?? locate(mid, depth.max + 0.05);
     const base = deck?.levelAt(threshold.x, threshold.z) ?? elevationAt(data, center.x, center.z);
     if (deck) {
       (deck.occupied ??= []).push({ position: center, radius: Math.hypot(width, length) / 2 });
@@ -1298,7 +1344,27 @@ function addWaitingShelters(
     }
     timberParts.push(part(mid, 1.08, rear, width - 0.16, 1.91, 0.075));
     if (!deck || !inside([center.x, -center.z], deck.outline)) {
-      trimParts.push(part(mid, -0.067, (rear + front) / 2, width - 0.15, 0.13, length - 0.12));
+      if (entrance) {
+        const positions = footprint.flatMap(point => [point.x, base, point.z]);
+        const indices = triangles(outline);
+        // Close the raised floor down to the graded ground along its exposed sides.
+        for (let i = 0; i < footprint.length; i++) {
+          if (i === entrance.index) continue;
+          const j = (i + 1) % footprint.length;
+          const a = footprint[i];
+          const b = footprint[j];
+          const bottom = positions.length / 3;
+          positions.push(a.x, Math.min(base - 0.1, gradedHeight(data, nearby, a.x, a.z)), a.z,
+            b.x, Math.min(base - 0.1, gradedHeight(data, nearby, b.x, b.z)), b.z);
+          indices.push(i, bottom, j, j, bottom, bottom + 1);
+        }
+        const floor = mesh(positions, indices, trim);
+        floor.name = 'Platform furniture';
+        floor.receiveShadow = true;
+        group.add(floor);
+      } else {
+        trimParts.push(part(mid, -0.067, (rear + front) / 2, width - 0.15, 0.13, length - 0.12));
+      }
     }
     if (feature.tags.bench === 'yes') {
       const benchWidth = Math.min(1.86, width - 0.32);
@@ -1444,11 +1510,10 @@ function addBuildingCluster(
         }
       }
     }
-    const taggedRoofColor = feature.tags['roof:colour'];
     const roofPalette = [0x877c73, 0x696466, 0x858783, 0x8a695f, 0x797674, 0x8f9594];
-    const roofColor = polished ? new Color(taggedRoofColor && /^#[0-9a-f]{6}$/i.test(taggedRoofColor)
-      ? taggedRoofColor : roofPalette[Math.floor(random() * roofPalette.length)]) : undefined;
-    if (roofColor && !taggedRoofColor && outline.length > 20) roofColor.lerp(new Color(0xa9a49c), 0.4);
+    const roofColor = polished
+      ? roofTint(feature.tags, roofPalette[Math.floor(random() * roofPalette.length)], roofRise === 0, outline)
+      : undefined;
     const roof = gabled ? gabledRoof(outline, roofRise, feature.tags['roof:orientation'] === 'across') : undefined;
     if (roof && roofColor) appendGabledRoof(batches, roof, height, roofColor, color);
     else appendRoof(batches, outline, height, roofRise, holes, roofColor);
@@ -1629,7 +1694,7 @@ function addPlatforms(
   const tactilePavers: Transform[] = [];
   const posts: Transform[] = [];
   const lamps: Transform[] = [];
-  const bulbs: PointLight[] = [];
+  const bulbs: (PointLight | SpotLight)[] = [];
   const platforms: PassengerPlatform[] = [];
   const amenities: PlatformAmenities = { wood: [], steel: [], glass: [], bins: [] };
   const stripe = material(0xd5bb6c, 0.85);
@@ -1740,8 +1805,13 @@ function addPlatforms(
         posts.push(beam(foot, mast, 0.11), beam(mast, hood, 0.052));
         lamps.push({ position: hood, scale: new Vector3(0.32, 0.07, 0.32) });
         if (bulbs.length < 5 && hood.distanceTo(track) < 68) {
-          const light = new PointLight(0xffcc85, 0, 19, 2);
+          const light = polished ? new SpotLight(0xffc38b, 0, 18, 0.96, 0.79, 2)
+            : new PointLight(0xffcc85, 0, 19, 2);
           light.position.copy(hood).add(new Vector3(0, -0.14, 0));
+          if (light instanceof SpotLight) {
+            light.target.position.copy(foot).addScaledVector(normal, 1.15);
+            group.add(light.target);
+          }
           bulbs.push(light);
           group.add(light);
         }
@@ -1920,7 +1990,11 @@ function contours(data: WorldData, points: LocalPoint[]) {
 }
 
 function addWater(group: Group, data: WorldData, surface: MeshStandardMaterial, polished: boolean,
-  reflection?: WaterReflection, placement?: SceneryPlacement) {
+  reflection?: WaterReflection, placement?: SceneryPlacement, bridgeTerrain?: {
+    group: Group;
+    rail: Rail;
+    nearby: ReturnType<typeof routeIndex>;
+  }) {
   const released: (() => void)[] = [];
   const bodies = data.features.filter(feature => feature.type === 'water');
   if (polished && bodies.length) applyWaterBanks(surface, createShorelineField(data.terrain, bodies));
@@ -1932,9 +2006,31 @@ function addWater(group: Group, data: WorldData, surface: MeshStandardMaterial, 
     const holes = (feature.holes ?? []).map((hole) => contours(data, polygon(hole))).filter((hole) => hole.length >= 3);
     const rings = [...outline, ...holes.flat()];
     const indices = triangles(outline, holes);
+    let correction: RiverTerrainCorrection | undefined;
+    if (bridgeTerrain && feature.tags.water === 'river') {
+      const { group: terrain, rail, nearby } = bridgeTerrain;
+      const areas = data.spans.filter(span => span.bridge && span.end - span.start > 12)
+        .map(span => rail.position((span.start + span.end) / 2))
+        .filter(({ x, z }) => inside([x, -z], outline) && !holes.some(hole => inside([x, -z], hole)))
+        .map(({ x, z }) => ({
+          x, z, sample: sampleVossStreetTerrain(terrain, { center: [x, -z], radiusMetres: 65 },
+            (east, worldZ) => gradedHeight(data, nearby, east, worldZ)),
+        }));
+      if (areas.length) correction = {
+        refine: (east, north) => areas.some(area => Math.hypot(area.x - east, area.z + north) < 54 + data.terrain.spacing),
+        floor: (east, north, baseHeight) => {
+          const area = areas.find(area => Math.hypot(area.x - east, area.z + north) < 52);
+          if (!area) return -Infinity;
+          const strength = 1 - smoothstep((Math.hypot(area.x - east, area.z + north) - 39) / 13);
+          const raised = baseHeight + Math.max(0, area.sample(east, -north) - baseHeight) * strength;
+          const track = nearby(east, -north);
+          return track && track.distance < 3 ? Math.min(raised, track.height - 1.18) : raised;
+        },
+      };
+    }
     const river = polished && feature.tags.water === 'river' ? buildRiverSurface(rings, indices,
       (east, north) => elevationAt(data, east, -north), data.terrain.spacing,
-      [data.terrain.east, data.terrain.north], placement && ((east, north) => placement.ownsCell(east, -north))) : undefined;
+      [data.terrain.east, data.terrain.north], placement && ((east, north) => placement.ownsCell(east, -north)), correction) : undefined;
     const points = river?.points ?? rings;
     if (!points.length) continue;
     const vertices = points.flatMap(([east, north], index) => [east, river?.heights[index] ?? waterLevel, -north]);
@@ -2541,16 +2637,22 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   if (polished) dustHighPeaks(distantGround);
   const nearby = routeIndex(placement?.gradeRail ?? rail, placement?.gradeSpans ?? data.spans);
   const paint = terrainPalette(data, nearby, Boolean(exposedRock));
-  const terrain = createTerrain(data, nearby, ground, paint, Boolean(exposedRock), placement?.ownsCell);
+  const cut = exposedRock ? tunnelCutField(placement?.gradeRail ?? rail, placement?.gradeSpans ?? data.spans) : undefined;
+  if (cut) dressTunnelCut(ground);
+  const terrain = createTerrain(data, nearby, ground, paint, Boolean(exposedRock), placement?.ownsCell, cut);
   const terrainTiles = terrain.children.filter(tile => tile instanceof Mesh);
   group.add(terrain);
   const applyTrackDetail = addTrack(group, data, rail, ballast, concrete, nearby,
-    exposedRock ? { surface: ground, paint } : undefined);
+    exposedRock ? { surface: ground, paint, cut } : undefined);
   addParallelTracks(group, data, nearby, ballast, polished);
-  const releaseWater = addWater(group, data, water, polished, maps.waterReflection, placement);
+  const releaseWater = addWater(group, data, water, polished, maps.waterReflection, placement,
+    polished ? { group: terrain, rail, nearby } : undefined);
   addBuildings(group, data, windows, roofs, maps.siding, nearby, polished);
+  const streets = maps.vossStreets;
   const vegetation = polished ? createVegetation(data, rail, {
     ownsCell: placement?.ownsCell,
+    meadowAllowed: streets && ((east, north) =>
+      Math.hypot(east - streets.center[0], north - streets.center[1]) > streets.radiusMetres),
     heightAt: (x, z) => gradedHeight(data, nearby, x, z),
     portalRail: placement?.gradeRail,
     portalSpans: placement?.gradeSpans,
@@ -2563,8 +2665,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
   const grass = vegetation ? undefined : addTracksideGrass(group, data, rail, nearby);
   const setSignal = addSignals(group, data, nearby);
   const { bulbs, platforms, setPlatformWeather } = addPlatforms(group, data, rail, concrete, fixtures, nearby, polished, maps.siding);
-  if (polished) addWaitingShelters(group, data, platforms, maps.siding);
-  const streets = maps.vossStreets;
+  if (polished) addWaitingShelters(group, data, platforms, nearby, maps.siding);
   if (polished && streets && data.stations.some(station => station.osmId === streets.stationOsmId)) {
     group.add(createVossStreets(streets, {
       heightAt: sampleVossStreetTerrain(terrain, streets, (east, z) => gradedHeight(data, nearby, east, z)),
@@ -2602,7 +2703,7 @@ export function createScenery(data: WorldData, rail: Rail, maps: SceneryMaps = {
     fixtures.emissiveIntensity = night ? 2.4 : 0;
     for (const bulb of bulbs) {
       bulb.visible = false;
-      bulb.intensity = night ? 31 : 0;
+      bulb.intensity = night ? bulb instanceof SpotLight ? 225 : 31 : 0;
     }
     water.color.setHex(polished ? (night ? 0x63758b : 0x7996a7) : (night ? 0x20354b : 0x365762));
   };

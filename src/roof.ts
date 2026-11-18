@@ -1,4 +1,4 @@
-import { ShapeUtils, Vector2 } from 'three';
+import { Color, ShapeUtils, Vector2 } from 'three';
 import type { LocalPoint } from './world-data.ts';
 
 export interface GabledRoof {
@@ -6,6 +6,22 @@ export interface GabledRoof {
   rim: LocalPoint[];
   heightAt(point: LocalPoint): number;
   uvAt(point: LocalPoint): [number, number];
+}
+
+export function roofTint(tags: Record<string, string>, fallback: number, flat: boolean, outline: LocalPoint[]) {
+  const tagged = tags['roof:colour'];
+  if (tagged && /^#[0-9a-f]{6}$/i.test(tagged)) return new Color(tagged);
+  const material = tags['roof:material'];
+  if (material === 'metal' || material === 'zinc') return new Color(0xafb8b8);
+  if (material === 'concrete' || material === 'asphalt') return new Color(0xa59f94);
+  const color = new Color(fallback);
+  if (!flat || material) return color;
+  const area = Math.abs(outline.reduce((total, [x, y], i) => {
+    const [a, b] = outline[(i + 1) % outline.length];
+    return total + x * b - y * a;
+  }, 0)) * 0.5;
+  const scale = Math.max(0, Math.min(1, (area - 320) / 520));
+  return color.lerp(new Color(0xc4c3bb), scale * 0.77);
 }
 
 export function gabledRoof(outline: LocalPoint[], rise: number, across = false): GabledRoof | undefined {

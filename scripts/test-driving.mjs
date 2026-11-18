@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createCanvas } from '@napi-rs/canvas';
 import { CabEffort, COMFORT_JERK, STEP, railGrip, stepTrain } from '../src/dynamics.ts';
-import { DrivingTutorial } from '../src/driving.ts';
+import { brakingGuidance, DrivingTutorial } from '../src/driving.ts';
 import { Rail } from '../src/rail.ts';
 import { Service } from '../src/service.ts';
+import { StoppingMarker } from '../src/showpiece-ui.ts';
 
 const rail = new Rail([
   { distance: 0, east: 0, north: 0, height: 50 },
@@ -111,6 +113,19 @@ test('preview uses the next signal in the running direction and brakes earlier o
   assert.ok(snow.guidance.recommendedSpeed < clear.guidance.recommendedSpeed);
 });
 
+test('a rolling platform approach suggests coasting and retains brake and low-speed power', () => {
+  const approach = { state: { speed: 28 / 3.6, acceleration: 0 }, gradient: .012,
+    brakeGrip: 1, tractionGrip: 1, currentLimit: 70, stopDistance: 134,
+    signalDistance: Infinity, restrictions: [] };
+  const coast = brakingGuidance(approach);
+  assert.equal(coast.target, 'station');
+  assert.equal(coast.powerNotch, 0);
+  assert.equal(coast.brakeNotch, 0);
+  assert.ok(brakingGuidance({ ...approach, stopDistance: 200 }).powerNotch > 0);
+  assert.ok(brakingGuidance({ ...approach, state: { ...approach.state, speed: 1 } }).powerNotch > 0);
+  assert.ok(brakingGuidance({ ...approach, state: { ...approach.state, speed: 13 } }).brakeNotch > 0);
+});
+
 test('advisory notches serve each stop, collect boarding results, and preserve replay safety', () => {
   for (const surface of ['clear', 'rain', 'snow']) {
     const service = new Service(data, rail, { driving: true });
@@ -178,4 +193,24 @@ test('tutorial progresses through real braking, coasting, doors and view control
   assert.ok(tutorial.done);
   assert.ok(service.state.elapsed < 60);
   assert.deepEqual(service.stopResults, []);
+});
+
+test('the world stop marker remains anchored and enlarges for approach visibility', (t) => {
+  const previous = globalThis.document;
+  globalThis.document = { createElement: () => createCanvas(1, 1) };
+  t.after(() => { globalThis.document = previous; });
+  const marker = new StoppingMarker();
+  const stop = stations[1];
+  marker.update(rail, stop, stop.stopDistance - 47, true);
+  assert.ok(marker.group.visible);
+  const anchor = marker.group.position.clone();
+  const label = marker.group.children[0];
+  const approachWidth = label.scale.x;
+  assert.ok(approachWidth > 4.5);
+  assert.deepEqual([...label.material.map.image.getContext('2d').getImageData(60, 35, 1, 1).data], [243, 189, 89, 255]);
+  marker.update(rail, stop, stop.stopDistance, true);
+  assert.ok(label.scale.x < approachWidth);
+  assert.deepEqual(marker.group.position, anchor);
+  marker.update(rail, stop, stop.stopDistance - 400, true);
+  assert.equal(marker.group.visible, false);
 });

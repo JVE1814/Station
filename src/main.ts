@@ -638,7 +638,7 @@ async function run(): Promise<void> {
       || (traffic?.active.some(movement => Math.abs(movement.chainage() - chainage) <= 180) ?? false);
     const focus = liveStockShadows ? rail.position(chainage - 24.6, stockShadowCenter) : undefined;
     atmosphere.update(cab.group.position, cameras.camera.position, visualTime,
-      inTunnel && cameras.view === 'cab', focus);
+      inTunnel && cameras.view === 'cab', focus, cameras.view === 'cab');
     scenery.update(visualTime, cameras.camera.position, chainage, cameras.mapFocus);
     updateMapScenery(visualTime, cameras.camera.position, cameras.mapFocus);
     markPhase('station-render-start');

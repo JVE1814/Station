@@ -11,6 +11,8 @@ interface Shot {
   height?: number;
   lift?: number;
   mapLean?: number;
+  mapBearing?: number;
+  focusOffset?: [east: number, south: number];
 }
 
 export function heroShots(route: NetworkRoute): Shot[] {
@@ -25,17 +27,25 @@ export function heroShots(route: NetworkRoute): Shot[] {
     { id: '01-lakeside-chase', view: 'chase', distance: lake, speed: 17, orbit: [28, 1.24, 2.19], lift: 4.3 },
     { id: '02-evanger-cab', view: 'cab', distance: evanger.stopDistance + 240, speed: 13 },
     { id: '03-seimsgrend', view: 'chase', distance: seimsgrend.stopDistance, speed: 0, orbit: [22, 1.39, 1.80], lift: 1.1 },
-    { id: '04-river-bridge', view: 'chase', distance: (bridge.start + bridge.end) * .5, speed: 16, orbit: [35, 1.37, -1.96], lift: 2.5 },
+    { id: '04-river-bridge', view: 'chase', distance: (bridge.start + bridge.end) * .5, speed: 16, orbit: [37, 1.25, 2.05] },
     { id: '05-tunnel-mouth', view: 'chase', distance: tunnel.end + 22, speed: 14, orbit: [31, 1.27, 2.16], lift: 1.8 },
     { id: '06-bulken-cab', view: 'cab', distance: bulken.stopDistance - 38, speed: 8 },
     { id: '07-lake-overlook', view: 'map', distance: lake + 180, speed: 16, height: 148, mapLean: .95, lift: 3 },
-    { id: '08-voss-overlook', view: 'map', distance: voss.stopDistance - 20, speed: 3, height: 105 },
+    { id: '08-voss-overlook', view: 'map', distance: voss.stopDistance - 20, speed: 3,
+      height: 75, mapLean: 1.36, mapBearing: -2.24, focusOffset: [14, 10], lift: 3 },
   ];
 }
 
 export function frameHero(cameras: Cameras, shot: Shot, train: Vector3): void {
   cameras.select(shot.view);
   if (shot.orbit) cameras.setChaseOrbit(...shot.orbit);
-  if (shot.height) cameras.fitMap(train, train, shot.height, true);
-  cameras.cut(shot.lift, shot.mapLean);
+  if (shot.height) {
+    const focus = train.clone();
+    if (shot.focusOffset) {
+      focus.x += shot.focusOffset[0];
+      focus.z += shot.focusOffset[1];
+    }
+    cameras.fitMap(focus, train, shot.height, true);
+  }
+  cameras.cut(shot.lift, shot.mapLean, shot.mapBearing);
 }

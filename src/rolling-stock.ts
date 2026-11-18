@@ -12,6 +12,7 @@ import {
   DataTexture,
   DoubleSide,
   DynamicDrawUsage,
+  ExtrudeGeometry,
   FrontSide,
   Group,
   InstancedMesh,
@@ -23,9 +24,11 @@ import {
   MeshBasicMaterial,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
+  Path,
   PlaneGeometry,
   PointLight,
   ShaderMaterial,
+  Shape,
   SphereGeometry,
   SpotLight,
   Sprite,
@@ -583,9 +586,10 @@ function headlampGlow() {
 }
 
 function trainHeadlight(body: Group, showpiece = false) {
-  const light = new SpotLight(0xffe5c4, showpiece ? 350 : 380, 125, 0.21, 0.68, 1.25);
+  const light = showpiece ? new SpotLight(0xffe5c4, 145, 73, 0.245, 0.89, 1.39)
+    : new SpotLight(0xffe5c4, 380, 125, 0.21, 0.68, 1.25);
   light.position.set(0, 1.64, -12.15);
-  light.target.position.set(0, 0.70, -52);
+  light.target.position.set(0, showpiece ? 0.20 : 0.70, showpiece ? -36.5 : -52);
   light.visible = false;
   const length = showpiece ? 52 : 46;
   const beam = new Mesh(
@@ -621,7 +625,8 @@ function trainHeadlight(body: Group, showpiece = false) {
         }`,
     }),
   );
-  const depression = Math.atan2(0.94, 39.85);
+  const depression = Math.atan2(light.position.y - light.target.position.y,
+    light.position.z - light.target.position.z);
   beam.rotateX(Math.PI / 2 - depression);
   beam.position.set(0, -Math.sin(depression) * length / 2, -Math.cos(depression) * length / 2);
   light.add(beam);
@@ -661,8 +666,8 @@ export function createTrain(leading = true, brushedSteel?: Texture, showpiece = 
   const materials = makeTrainMaterials();
   const { siding, underframe, metal, trim } = materials;
   const paintedShell = showpiece ? new MeshPhysicalMaterial({
-    color: 0x9f2527, roughness: 0.33, metalness: 0.22, clearcoat: 0.78,
-    clearcoatRoughness: 0.21, vertexColors: true,
+    color: 0x9f2527, roughness: 0.41, metalness: 0.18, clearcoat: 0.64,
+    clearcoatRoughness: 0.30, specularIntensity: 0.77, vertexColors: true,
   }) : materials.paint;
   const roofSnow = paintedShell instanceof MeshPhysicalMaterial ? snowOnPaint(paintedShell) : undefined;
   siding.map = brushedSteel ?? null;
@@ -693,8 +698,8 @@ export function createTrain(leading = true, brushedSteel?: Texture, showpiece = 
   function update(state: TrainVisualState) {
     windowMaterial.emissiveIntensity = state.night ? (showpiece ? 1.85 : 0.75) : showpiece ? .063 : .025;
     if (paintedShell instanceof MeshPhysicalMaterial) {
-      paintedShell.roughness = state.weather === 'rain' ? 0.24 : 0.33;
-      paintedShell.clearcoatRoughness = state.weather === 'rain' ? 0.09 : 0.21;
+      paintedShell.roughness = state.weather === 'rain' ? 0.28 : 0.41;
+      paintedShell.clearcoatRoughness = state.weather === 'rain' ? 0.13 : 0.30;
       siding.roughness = state.weather === 'rain' ? 0.28 : 0.35;
     }
     if (roofSnow) roofSnow.value = state.weather === 'snow' ? 0.92 : 0;
@@ -871,6 +876,110 @@ function deskLever(group: Group, metal: MeshStandardMaterial, black: MeshStandar
   return assembly;
 }
 
+function deskOutline(path: Path, x: number, z: number, width: number, depth: number, radius: number): Path {
+  const left = x - width / 2;
+  const right = x + width / 2;
+  const bottom = -z - depth / 2;
+  const top = -z + depth / 2;
+  path.moveTo(left + radius, bottom);
+  path.lineTo(right - radius, bottom);
+  path.quadraticCurveTo(right, bottom, right, bottom + radius);
+  path.lineTo(right, top - radius);
+  path.quadraticCurveTo(right, top, right - radius, top);
+  path.lineTo(left + radius, top);
+  path.quadraticCurveTo(left, top, left, top - radius);
+  path.lineTo(left, bottom + radius);
+  path.quadraticCurveTo(left, bottom, left + radius, bottom);
+  path.closePath();
+  return path;
+}
+
+function recessedController(desk: Group, x: number, metal: MeshStandardMaterial, well: MeshStandardMaterial,
+  trim: MeshStandardMaterial, grip: MeshStandardMaterial, gripInsert: MeshStandardMaterial, brake: boolean): Group {
+  const z = 0.025;
+  roundedBox(desk, well, [0.169, 0.010, 0.248], [x, 0.013, z], 0.005);
+  for (const side of [-1, 1]) {
+    roundedBox(desk, metal, [0.011, 0.011, 0.205], [x + side * 0.035, 0.023, z], 0.005);
+    for (let index = 0; index < 6; index++) {
+      const width = index % 5 === 0 ? 0.021 : 0.014;
+      box(desk, index === 0 && brake ? gripInsert : metal, [width, 0.002, 0.0037],
+        [x + side * 0.061, 0.0195, z + 0.09 - 0.035 * index]);
+    }
+    cylinder(desk, trim, 0.010, 0.003, [x, 0.019, z + side * 0.108], 12);
+  }
+
+  const lever = new Group();
+  lever.name = brake ? 'Cab brake lever' : 'Cab power lever';
+  lever.position.set(x, 0.023, z);
+  roundedBox(lever, trim, [0.063, 0.037, 0.072], [0, 0.018, 0], 0.017);
+  rod(lever, metal, 0.013, new Vector3(0, 0.025, 0), new Vector3(0, 0.166, 0));
+  cylinder(lever, trim, 0.021, 0.018, [0, 0.141, 0], 18);
+  roundedBox(lever, grip, [brake ? 0.128 : 0.146, 0.052, 0.067], [0, 0.173, 0], 0.023);
+  roundedBox(lever, gripInsert, [brake ? 0.088 : 0.102, 0.010, 0.047], [0, 0.198, 0], 0.005);
+  for (let index = -2; index <= 2; index++) {
+    roundedBox(lever, trim, [0.009, 0.003, 0.028], [0.017 * index, 0.204, 0], 0.0015);
+  }
+  batchRigidParts(lever);
+  desk.add(lever);
+  return lever;
+}
+
+function detailedDesk(group: Group, charcoal: MeshStandardMaterial, trim: MeshStandardMaterial,
+  amber: MeshStandardMaterial, green: MeshStandardMaterial, grain?: Texture) {
+  const composite = surface(0x3e4341, 0.66, 0.06);
+  composite.name = 'Molded cab console polymer';
+  composite.bumpMap = grain ?? null;
+  composite.bumpScale = 0.0017;
+  const edge = surface(0x42494b, 0.35, 0.61);
+  edge.name = 'Cab console anodized control trim';
+  const recess = surface(0x131a1b, 0.94, 0.02);
+  recess.name = 'Cab console recessed mechanism';
+  const bakelite = surface(0x323b3b, 0.39, 0.05);
+  bakelite.name = 'Cab console control cap';
+  const tractionGrip = surface(0x424749, 0.63, 0.03);
+  const brakeGrip = surface(0x725047, 0.64, 0.02);
+  const xs = [-1.07, -0.90, -0.73, -0.56, -0.39];
+
+  roundedBox(group, charcoal, [2.71, 0.125, 0.61], [-0.15, -0.061, 0], 0.042);
+  const outline = new Shape();
+  deskOutline(outline, -0.15, 0, 2.668, 0.575, 0.044);
+  outline.holes.push(deskOutline(new Path(), -0.73, -0.105, 0.885, 0.138, 0.021));
+  for (const x of [0.26, 0.76]) {
+    outline.holes.push(deskOutline(new Path(), x, 0.025, 0.188, 0.270, 0.020));
+  }
+  const consoleGeometry = new ExtrudeGeometry(outline, {
+    depth: 0.026, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 3, curveSegments: 5,
+  });
+  consoleGeometry.rotateX(-Math.PI / 2);
+  consoleGeometry.translate(0, 0.005, 0);
+  // Both face groups share the molded material so the console stays a single draw.
+  consoleGeometry.clearGroups();
+  const console = new Mesh(consoleGeometry, composite);
+  console.name = 'Cab console with recessed controls';
+  console.receiveShadow = true;
+  group.add(console);
+  roundedBox(group, trim, [2.63, 0.044, 0.065], [-0.15, 0.004, 0.294], 0.021);
+
+  roundedBox(group, recess, [0.867, 0.017, 0.121], [-0.73, 0.011, -0.105], 0.008);
+  for (const x of [-1.137, -0.323]) {
+    cylinder(group, edge, 0.009, 0.005, [x, 0.020, -0.105], 12);
+    box(group, recess, [0.010, 0.001, 0.0015], [x, 0.023, -0.105]).rotation.y = 0.8;
+  }
+  for (const [index, x] of xs.entries()) {
+    roundedBox(group, edge, [0.111, 0.010, 0.095], [x, 0.024, -0.105], 0.005);
+    const cap = roundedBox(group, bakelite, [0.088, 0.023, 0.073], [x, 0.036, -0.105], 0.010);
+    cap.rotation.x = index % 2 === 0 ? -0.21 : 0.21;
+    const lens = index === 1 ? green : index === 2 ? amber : recess;
+    roundedBox(group, lens, [0.036, 0.006, 0.018], [x, 0.049, -0.12], 0.003);
+    cylinder(group, edge, 0.032, 0.007, [x, 0.039, 0.121], 24);
+    cylinder(group, bakelite, 0.023, 0.018, [x, 0.052, 0.121], 24);
+    box(group, edge, [0.015, 0.0015, 0.002], [x, 0.062, 0.114]).rotation.y = 0.6;
+  }
+  const throttle = recessedController(group, 0.26, edge, recess, trim, bakelite, tractionGrip, false);
+  const brake = recessedController(group, 0.76, edge, recess, trim, bakelite, brakeGrip, true);
+  return { throttle, brake };
+}
+
 let windscreenMarks: DataTexture | undefined;
 
 function windscreenTexture() {
@@ -996,7 +1105,7 @@ function wetWindscreen(group: Group, trim: MeshStandardMaterial) {
         vec3 pattern = texture2D(marks, slide).rgb;
         float opacity = mix(pattern.g, pattern.r * 0.47 + pattern.b * 0.33, rain);
         vec2 inset = min(paneUv, 1.0 - paneUv);
-        opacity *= smoothstep(.013, .074, min(inset.x, inset.y));
+        opacity *= smoothstep(.028, .087, min(inset.x, inset.y));
         if (opacity < 0.011) discard;
         vec3 frost = vec3(0.67, 0.82, 0.93);
         vec3 drop = mix(vec3(0.22, 0.32, 0.42), vec3(0.68, 0.79, 0.85), pattern.b);
@@ -1070,6 +1179,7 @@ function makeCabGeometry(group: Group, grain?: Texture, showpiece = false) {
   if (!showpiece) cabWipers(group, trim, false);
 
   const dash = new Group();
+  dash.name = 'Cab instruments';
   dash.position.set(0.15, 2.22, -10.76);
   dash.rotation.x = -0.35;
   group.add(dash);
@@ -1085,11 +1195,11 @@ function makeCabGeometry(group: Group, grain?: Texture, showpiece = false) {
     }
   }
   if (showpiece) {
-    box(dash, trim, [1.78, 0.010, 0.017], [0.03, -0.153, 0.022]);
-    box(dash, brushed, [1.78, 0.003, 0.012], [0.03, -0.158, 0.025]);
     for (const x of [-0.69, 0.84]) {
+      roundedBox(dash, rubber, [0.093, 0.163, 0.012], [x, 0.012, 0.022], 0.006);
       for (let slot = 0; slot < 7; slot++) {
-        box(dash, trim, [0.078, 0.005, 0.012], [x, 0.078 - 0.022 * slot, 0.025]);
+        const louvre = box(dash, brushed, [0.073, 0.005, 0.005], [x, 0.078 - 0.022 * slot, 0.029]);
+        louvre.rotation.x = 0.38;
       }
     }
   }
@@ -1098,22 +1208,30 @@ function makeCabGeometry(group: Group, grain?: Texture, showpiece = false) {
   controls.position.set(0.15, 1.96, -10.42);
   controls.rotation.x = 0.17;
   group.add(controls);
-  roundedBox(controls, charcoal, [2.71, 0.139, 0.61], [-0.15, -0.035, 0], 0.044);
-  roundedBox(controls, dashboard, [2.69, 0.058, 0.59], [-0.15, 0.003, 0], 0.022);
-  roundedBox(controls, trim, [2.68, 0.058, 0.091], [-0.15, -0.006, 0.30], 0.022);
-
-  const throttle = deskLever(controls, brushed, trim, 0.26, 0.03);
-  const brake = deskLever(controls, brushed, trim, 0.76, 0.03);
-
-  const amber = surface(0x9d601f, 0.44, 0.12);
+  const amber = showpiece
+    ? new MeshPhysicalMaterial({ color: 0xb36726, roughness: 0.28, clearcoat: 0.79, clearcoatRoughness: 0.15 })
+    : surface(0x9d601f, 0.44, 0.12);
   amber.emissive.setHex(0xff8b1b);
-  const green = surface(0x395846, 0.44, 0.12);
+  const green = showpiece
+    ? new MeshPhysicalMaterial({ color: 0x3a6151, roughness: 0.3, clearcoat: 0.76, clearcoatRoughness: 0.18 })
+    : surface(0x395846, 0.44, 0.12);
   green.emissive.setHex(0x4ada80);
-  for (const [index, x] of [-1.07, -0.90, -0.73, -0.56, -0.39].entries()) {
-    box(controls, trim, [0.12, 0.016, 0.10], [x, 0.046, -0.11]);
-    box(controls, index === 1 ? green : index === 2 ? amber : dashboard, [0.087, 0.019, 0.075], [x, 0.058, -0.11]);
-    const knob = cylinder(controls, brushed, 0.033, 0.022, [x, 0.045, 0.118]);
-    knob.castShadow = true;
+  let throttle: Group;
+  let brake: Group;
+  if (showpiece) {
+    ({ throttle, brake } = detailedDesk(controls, charcoal, trim, amber, green, deskGrain));
+  } else {
+    roundedBox(controls, charcoal, [2.71, 0.139, 0.61], [-0.15, -0.035, 0], 0.044);
+    roundedBox(controls, dashboard, [2.69, 0.058, 0.59], [-0.15, 0.003, 0], 0.022);
+    roundedBox(controls, trim, [2.68, 0.058, 0.091], [-0.15, -0.006, 0.30], 0.022);
+    throttle = deskLever(controls, brushed, trim, 0.26, 0.03);
+    brake = deskLever(controls, brushed, trim, 0.76, 0.03);
+    for (const [index, x] of [-1.07, -0.90, -0.73, -0.56, -0.39].entries()) {
+      box(controls, trim, [0.12, 0.016, 0.10], [x, 0.046, -0.11]);
+      box(controls, index === 1 ? green : index === 2 ? amber : dashboard, [0.087, 0.019, 0.075], [x, 0.058, -0.11]);
+      const knob = cylinder(controls, brushed, 0.033, 0.022, [x, 0.045, 0.118]);
+      knob.castShadow = true;
+    }
   }
   const labels = [
     { label: 'PÅDRAG', x: 0.26, z: 0.237, width: 0.143 },

@@ -12,8 +12,8 @@ test('water depths fade from the source banks and island holes independently of 
   const outline = [[-80, -72], [81, -72], [81, 73], [-80, 73]];
   const hole = [[-13, -10], [-13, 13], [12, 13], [12, -10]];
   const field = createShorelineField(terrain, [{ osmId: 1, type: 'water', points: outline, holes: [hole], tags: {} }]);
-  const { width, data } = field.texture.image;
-  const at = (east, north) => data[Math.floor((90 - north) / 6) * width + Math.floor((east + 90) / 6)];
+  const { width, height, data } = field.texture.image;
+  const at = (east, north) => data[Math.floor((90 - north) * height / 180) * width + Math.floor((east + 90) * width / 180)];
   assert.equal(at(1, 1), 0);
   assert.equal(at(-86, 1), 0);
   assert.ok(at(17, 1) < at(30, 1));

@@ -64,7 +64,7 @@ test('failure during the mirror pass also recovers water and renderer state', ()
   reflection.dispose();
 });
 
-test('projective water shader retains the existing material hook and rotates the second normal sample', () => {
+test('projective water and surface shading share the wind-warped ripple slope', () => {
   const material = new MeshStandardMaterial();
   material.onBeforeCompile = shader => { shader.uniforms.base = { value: 1 }; };
   decorrelateWaterNormals(material);
@@ -74,13 +74,15 @@ test('projective water shader retains the existing material hook and rotates the
   const shader = {
     uniforms: {},
     vertexShader: '#include <common>\n#include <worldpos_vertex>',
-    fragmentShader: '#include <common>\n#include <normal_fragment_maps>\n#include <opaque_fragment>',
+    fragmentShader: '#include <common>\n#include <normalmap_pars_fragment>\n#include <normal_fragment_maps>\n#include <opaque_fragment>',
   };
   material.onBeforeCompile(shader, {});
   assert.equal(shader.uniforms.base.value, 1);
   assert.ok(shader.uniforms.lakeMirror.value.isTexture);
   assert.match(shader.vertexShader, /lakeProjection \* lakeWorld/);
-  assert.match(shader.fragmentShader, /rotation \* vNormalMapUv \* 1.719/);
+  assert.match(shader.fragmentShader, /rotation \* basin \* 1.379/);
+  assert.match(shader.fragmentShader, /lakeRipples\(vNormalMapUv\) \* normalScale/);
+  assert.match(shader.fragmentShader, /waveOffset = lakeRipples\(vNormalMapUv\)/);
   assert.match(shader.fragmentShader, /texture2D\(lakeMirror,/);
   reflection.dispose();
 });

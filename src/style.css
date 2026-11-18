@@ -11,17 +11,15 @@ body { margin: 0; overflow: hidden; }
 #simulator, #world { position: fixed; inset: 0; }
 #world canvas { display: block; touch-action: none; }
 .top-bar, .bottom-bar {
-  position: fixed;
-  left: 24px;
-  right: 24px;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   pointer-events: none;
 }
-.top-bar { top: 24px; }
-.bottom-bar { bottom: 39px; align-items: flex-end; }
+.top-bar { position: fixed; inset: 24px 24px auto; }
+.driving-hud { position: fixed; inset: auto 24px 39px; display: grid; gap: 10px; pointer-events: none; }
+.bottom-bar { align-items: flex-end; }
 .service-panel, .speed-panel, .controls-panel, .group, .notice, .help {
   background: #10191eed;
   border: 1px solid #526167;
@@ -73,7 +71,7 @@ meter::-webkit-meter-optimum-value { background: #d4ad6a; }
 .help p { padding: 8px; max-width: 260px; }
 .attribution { right: 24px; font-size: 11px; }
 @media (max-width: 760px) {
-  .top-bar, .bottom-bar { left: 10px; right: 10px; }
+  .top-bar, .driving-hud { left: 10px; right: 10px; }
   .top-bar { top: 10px; }
   kbd { display: none; }
   .control kbd { display: inline-block; }
@@ -107,14 +105,13 @@ body.showpiece { color: #f7f1e3; }
 #preview-signal[data-aspect="approach"] { color: #ffd79d; }
 #preview-signal[data-aspect="stop"] { color: #ffa89f; }
 #quality { margin: 3px; padding: 3px 5px; color: #f7f1e3; background: #182931; border: 1px solid #657078; border-radius: 4px; }
-.driver-card { position: fixed; left: 24px; bottom: 150px; max-width: 292px; padding: 15px 18px; border: 1px solid #52616a; color: #f2efe3; }
+.driver-card { justify-self: start; max-width: 292px; padding: 15px 18px; border: 1px solid #52616a; color: #f2efe3; pointer-events: auto; }
 .driver-card h2 { margin: 0 0 6px; font-size: 16px; font-weight: 650; letter-spacing: -.01em;}
 .driver-card strong { display: block; font-size: 25px; color: #f3d6ab; margin-bottom: 6px; }
 .driver-card p { margin: 3px 0; }
 .driver-card small { display: block; margin-top: 8px; color: #c6d2d9; }
 .driver-card button { margin-top: 8px; border-color: #5a6970; }
 @media (max-width: 760px) {
-  .driver-card { left: 10px; bottom: 125px; }
   .showpiece .auxiliary { flex-wrap: wrap; }
 }
 .showpiece .control output { min-width: 1ch; color: #f3d6ab; text-align: center; font-weight: 650; }

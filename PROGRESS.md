@@ -219,3 +219,10 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 - Captured the third set with consistently unique scenery tiles. Both reviewers assessed all fourteen images. The lowest score held at 2/10, for Seimsgrend foliage and the riverbank material. Reviewer B's lowest category was 3.6/10 and the lowest frame mean was the Voss overlook. [Review A](reference/r40/review-a.md) · [Review B](reference/r40/review-b.md)
 - Verified the camera transition fix in the production offline browser check. F4, F5 and F6 loaded, and F4 reached the mapped Stavanger camera position with the correct service still selected.
 - The next WebGL capture caught a GLSL reserved identifier in the distant-summit shader. Renamed it and restarted the complete verification and fourth gallery capture. The fourth score and the full verification result are pending.
+
+## Fourth Ultra gallery and blind review
+
+- Captured all fourteen 1920 × 1080 Ultra frames without duplicate scenery tiles or WebGL errors. Assembled and checked the eight matched comparison strips. The bridge strip uses the exact baseline and GPT Image edit for this round's lower viewpoint.
+- The lowest category held at 2/10 for the second successive round. Both reviewers found the foreground trees and broad water fade hurt the bridge shot. They also flagged airborne snow over the Bulken cab trim, the blank tunnel cut and sparse detail on the high Voss view. [Review A](reference/r40/review-a.md) · [Review B](reference/r40/review-b.md)
+- The full release check passed the R40 sources, rendered clearance, six weather replays and all three 1080p High graphics workload samples. Intercity service geography and replays passed. The all-tile intercity clearance and offline browser check are still running.
+- The next render batch restores the wider bridge angle and corrects the mapped river-edge intersection. It also includes cab and tunnel material revisions, warmer station lamps, shorter foreground grasses and a new same-chainage Voss composition.

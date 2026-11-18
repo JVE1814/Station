@@ -2,6 +2,8 @@
 
 Each golden-hour strip shows the baseline frame, the GPT Image paint-over of that frame, and the final Ultra render from left to right. Strips are 5760 × 1080. Each baseline and final frame is 1920 × 1080. The paint-over is scaled to fit its panel.
 
+The baseline uses the original renderer from `f90feff` with an adapter for the Evanger–Voss route and matching camera poses. Each original PNG was the input to its paired GPT Image edit. The game renders the final panels from the local route and scenery assets.
+
 | Shot | Golden-hour comparison | Blue hour | Heavy snow |
 | --- | --- | --- | --- |
 | Lakeside chase | [Triptych](01-lakeside-chase-golden-comparison.png) | [Final](01-lakeside-chase-night-final.png) | [Final](01-lakeside-chase-snow-final.png) |

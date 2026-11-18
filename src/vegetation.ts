@@ -214,6 +214,12 @@ function treeKind(feature: WorldFeature, roll: number): PlantKind {
   return forest[roll < 0.68 ? 0 : roll < 0.87 ? 1 : 2];
 }
 
+function maintainedHeight(maturity: number, setback: number, morph: number) {
+  const young = Math.min(maturity, 1.25 + Math.min(30, Math.max(0, setback - 6)) * 0.115 + morph * 0.94);
+  const recovery = Math.max(0, Math.min(1, (setback - 14) / 32)) ** 3;
+  return young + (maturity - young) * recovery;
+}
+
 export function placeVegetation(data: WorldData, rail: Rail, options: VegetationOptions = {}): Plant[] {
   const terrain = data.terrain;
   const extent = {
@@ -238,9 +244,11 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
     const gap = Math.sin(x * 0.021 + Math.sin(y * 0.013)) * Math.cos(y * 0.017 - Math.sin(x * 0.008));
     if (morph < Math.max(0, gap * 0.26)) return;
     const kind = treeKind(feature, hash(col, row, variant + 4));
-    const height = (kind === 'spruce' ? 7.5 : kind === 'pine' ? 7 : 5.4) + Math.pow(morph, 1.4) * 12;
+    const maturity = (kind === 'spruce' ? 7.5 : kind === 'pine' ? 7 : 5.4) + Math.pow(morph, 1.4) * 12;
+    const setback = distanceToTrack(x, y);
+    const height = maintainedHeight(maturity, setback, morph);
     const width = height * (kind === 'spruce' ? 0.28 : kind === 'pine' ? 0.43 : 0.4);
-    if (distanceToTrack(x, y) < width * 0.52 + 4.8) return;
+    if (setback < width * 0.52 + 4.8) return;
     plants.push(growth(x, y, kind, height, width, Math.floor(hash(col, row, variant + 6) * 2 ** 30)));
   };
   const cell = 24;
@@ -318,9 +326,11 @@ export function placeVegetation(data: WorldData, rail: Rail, options: Vegetation
         const x = along.x + side * shoulder.x * offset;
         const y = -along.z - side * shoulder.z * offset;
         const canopy = woodAt(x, y);
-        if (canopy && accepted(x, y) && distanceToTrack(x, y) >= 10) {
+        const setback = distanceToTrack(x, y);
+        if (canopy && accepted(x, y) && setback >= 10) {
           const kind = treeKind(canopy, hash(seed, side, 48));
-          const height = 1.6 + 3.25 * hash(seed, side, 81);
+          const morph = hash(seed, side, 81);
+          const height = maintainedHeight(1.6 + 3.25 * morph, setback, morph);
           plants.push(growth(x, y, kind, height, height * 0.43, seed * side));
         }
       }
@@ -633,12 +643,13 @@ function plantShader(material: Material, uniforms: PlantUniforms, shaded: boolea
     shader.uniforms.plantBreeze = uniforms.breeze;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
-attribute vec3 plantAtlas;
+attribute vec4 plantAtlas;
 attribute float plantCrown;
 uniform float plantTime;
 uniform float plantBreeze;
 varying float vPlantTip;
-varying float vPlantOpacity;`)
+varying float vPlantOpacity;
+varying float vBirchAutumn;`)
       .replace('#include <uv_vertex>', `#include <uv_vertex>
 #ifdef USE_MAP
 vec2 tile = mix(plantAtlas.xy, vec2(0.75, 0.0), plantCrown);
@@ -658,7 +669,8 @@ root = instanceMatrix * root;
 vec3 lookFrom = cameraPosition - (modelMatrix * root).xyz;
 float viewElevation = lookFrom.y / max(0.01, length(lookFrom));
 vPlantOpacity = mix(1.0, smoothstep(0.52, 0.77, viewElevation), plantCrown);
-vPlantTip = position.y;`);
+vPlantTip = position.y;
+vBirchAutumn = plantAtlas.w;`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying float vPlantOpacity;')
       .replace('#include <alphatest_fragment>', 'diffuseColor.a *= vPlantOpacity;\n#include <alphatest_fragment>');
@@ -669,7 +681,16 @@ vPlantTip = position.y;`);
       .replace('#include <common>', `#include <common>
 uniform float plantPowder;
 uniform float plantWet;
-varying float vPlantTip;`)
+varying float vPlantTip;
+varying float vBirchAutumn;`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+vec3 leafColor = diffuseColor.rgb;
+float greenSeparation = (leafColor.g - leafColor.r) / max(leafColor.g, 0.045);
+float goldMask = smoothstep(0.020, 0.17, greenSeparation)
+  * smoothstep(0.009, 0.039, leafColor.g - leafColor.b);
+float greenValue = max(0.03, leafColor.g);
+vec3 autumnGold = vec3(2.52, 1.37, 0.19) * greenValue;
+diffuseColor.rgb = mix(leafColor, autumnGold, goldMask * vBirchAutumn);`)
       .replace('#include <color_fragment>', `#include <color_fragment>
 float inLeaf = smoothstep(0.16, 0.58, vPlantTip);
 float leafTone = max(diffuseColor.g, diffuseColor.r);
@@ -685,10 +706,10 @@ type PlantBatch = { detailed?: InstancedMesh; simpler: InstancedMesh; cover: boo
 
 function buildBatch(plants: Plant[], base: BufferGeometry, detailedBase: BufferGeometry | null,
   material: Material, depth: Material, heightAt: (x: number, z: number) => number, cover: boolean): PlantBatch {
-  const atlas = new Float32Array(plants.length * 3);
+  const atlas = new Float32Array(plants.length * 4);
   const geometry = base.clone();
   const detailedGeometry = detailedBase?.clone();
-  const atlasAttribute = new InstancedBufferAttribute(atlas, 3);
+  const atlasAttribute = new InstancedBufferAttribute(atlas, 4);
   geometry.setAttribute('plantAtlas', atlasAttribute);
   detailedGeometry?.setAttribute('plantAtlas', atlasAttribute);
   const simpler = new InstancedMesh(geometry, material, plants.length);
@@ -697,20 +718,17 @@ function buildBatch(plants: Plant[], base: BufferGeometry, detailedBase: BufferG
   const color = new Color();
   plants.forEach((plant, index) => {
     const tile = cells.indexOf(plant.kind);
-    atlas[index * 3] = tile % 4 / 4;
-    atlas[index * 3 + 1] = tile < 4 ? 0.5 : 0;
-    atlas[index * 3 + 2] = plant.rotation * 2.35;
+    atlas[index * 4] = tile % 4 / 4;
+    atlas[index * 4 + 1] = tile < 4 ? 0.5 : 0;
+    atlas[index * 4 + 2] = plant.rotation * 2.35;
+    const succession = Math.sin(plant.east * 0.016 + Math.sin(plant.north * 0.021));
+    atlas[index * 4 + 3] = plant.kind === 'birch' ? 0.68 + 0.21 * succession + plant.tint * 0.10 : 0;
     dummy.position.set(plant.east, heightAt(plant.east, -plant.north) - 0.085, -plant.north);
     dummy.rotation.y = plant.rotation;
     dummy.scale.set(plant.width, plant.height, plant.width);
     dummy.updateMatrix();
     simpler.setMatrixAt(index, dummy.matrix);
-    const autumn = plant.kind === 'birch'
-      ? Math.max(0, Math.sin(plant.east * 0.012 + Math.sin(plant.north * 0.017)) * 0.54 + plant.tint * 0.44)
-      : 0;
-    color.setRGB(plant.tint * (1 + autumn * 0.29),
-      0.80 + plant.tint * 0.20 - autumn * 0.12,
-      0.83 + plant.tint * 0.17 - autumn * 0.43);
+    color.setRGB(plant.tint, 0.80 + plant.tint * 0.20, 0.83 + plant.tint * 0.17);
     simpler.setColorAt(index, color);
   });
   simpler.name = cover ? 'Railway understory' : 'Mapped woodland canopy';

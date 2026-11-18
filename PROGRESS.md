@@ -139,6 +139,9 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 
 ## Lakeside chase vegetation pass
 
-- On the 8.7 km Evanger–Voss tile, the previous global spacing thinned the active woods to 22 tree roots within 80 m of the track point. Denser sampling of the same OSM woods now places 223 roots within 80 m and 1,688 within 225 m. Maple-free warm autumn tints distinguish scattered birches from pine and spruce. Clustered low plants occupy dry, moderate-slope shoulders while preserving mapped exclusions.
+- On the 8.7 km Evanger–Voss tile, the previous global spacing thinned the active woods to 22 tree roots within 80 m of the track point. Denser sampling of the same OSM woods now places 223 roots within 80 m and 1,688 within 225 m. Warm autumn tints distinguish scattered birches from pine and spruce. Clustered low plants occupy dry, moderate-slope shoulders while preserving mapped exclusions.
 - In the chase view, tree crowns now stay out of low-angle views through an eye-elevation test. The above-canopy representation remains available for steep overhead views. The targeted tests cover placement ownership, mapped exclusions, species tags, low-angle crown visibility and synchronized shadow motion.
 - Indexed polygon edges by scan rows. The new placement generated the same full tile layout in 0.60 s during the local Node check, down from 6.47 s before indexing. TypeScript, targeted lint and all three vegetation tests passed.
+
+- Graduated trackside tree height from maintained suckers to mature woodland. In the same lakeside scene, the tallest rooted tree within 14 m of rail fell from 17.56 m to 2.78 m, and the tallest within 26 m fell from 18.95 m to 5.01 m. The mapped forest footprint and shrub exclusions still apply.
+- Added autumn colour within the birch shader using leaf chroma before any instance tint. In the original cutout, the mask strongly selected 75% of the sampled opaque canopy pixels and selected zero of the 4,023 sampled bare-stem pixels. Pine and spruce bypass the autumn mask.

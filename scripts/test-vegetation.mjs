@@ -38,7 +38,10 @@ test('woodland and understory respect mapped no-growth areas and streamed tile o
     assert.ok(!(east >= 4 && east <= 15 && north >= 24 && north <= 80));
     if (forest.has(kind)) assert.equal(kind, 'birch');
     const minimum = forest.has(kind) ? 4.8 + width * 0.52 : 3.05 + width * 0.55;
-    assert.ok(Math.min(east, Math.abs(east - 21)) >= minimum);
+    const setback = Math.min(east, Math.abs(east - 21));
+    assert.ok(setback >= minimum);
+    if (forest.has(kind) && setback < 14) assert.ok(plant.height < 3.2);
+    if (forest.has(kind) && setback < 26) assert.ok(plant.height < 6);
   }
   assert.ok(placeVegetation(data, rail).every(plant =>
     !(plant.east >= -80 && plant.east <= -40 && plant.north >= -80 && plant.north <= -40)));
@@ -71,13 +74,16 @@ test('woodland detail is exclusive and wind updates matching shadow depth geomet
       assert.equal(near.customDepthMaterial.map, near.material.map);
       assert.ok(near.geometry.getAttribute('plantAtlas').isInstancedBufferAttribute);
       const vertexShader = ['#include <common>', '#include <uv_vertex>', '#include <begin_vertex>'].join('\n');
-      const color = { uniforms: {}, vertexShader, fragmentShader: '#include <common>\n#include <color_fragment>' };
+      const color = { uniforms: {}, vertexShader,
+        fragmentShader: '#include <common>\n#include <map_fragment>\n#include <color_fragment>' };
       const depth = { uniforms: {}, vertexShader, fragmentShader: '#include <common>\n#include <alphatest_fragment>' };
       near.material.onBeforeCompile(color);
       near.customDepthMaterial.onBeforeCompile(depth);
       assert.equal(color.vertexShader, depth.vertexShader);
       assert.match(color.vertexShader, /lookFrom.y \/ max\(0.01, length\(lookFrom\)\)/);
       assert.match(color.vertexShader, /smoothstep\(0.52, 0.77, viewElevation\)/);
+      assert.match(color.fragmentShader, /goldMask \* vBirchAutumn/);
+      assert.equal(near.geometry.getAttribute('plantAtlas').itemSize, 4);
       assert.equal(color.uniforms.plantTime, depth.uniforms.plantTime);
       assert.equal(color.uniforms.plantTime.value, 0.2);
       assert.equal(color.uniforms.plantPowder.value, 1);

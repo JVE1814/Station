@@ -1,0 +1,4 @@
+Zoomed from the whole network to mapped Stavanger platforms without changing the F4 service.
+F4 offline WebGL2 service and whole-network camera loaded with zero console errors.
+F5 offline WebGL2 service and whole-network camera loaded with zero console errors.
+F6 offline WebGL2 service and whole-network camera loaded with zero console errors.

@@ -79,7 +79,7 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 
 ## Cab frame profiling
 
-- The second cab sample recorded 12.48 ms on the SwiftShader CPU proxy, despite reducing the last frame to 274 draws. The chase view measured 6.63 ms. A separate phase trace found most of the cab work inside the WebGL render call.
+- The second SwiftShader CPU proxy run recorded 12.48 ms in the cab, 6.63 ms in chase and 14.01 ms in Bird’s-eye view. A separate phase trace found most of the cab work inside the WebGL render call.
 - Instanced moving door components and merged rigid opaque stock casters for the depth pass. The tests check both door sides, texture and shadow flags, and retained geometry. Added a wider cached shadow view for the cab and high map, kept live stock shadows where the train is visible, and draw opaque cockpit depth before scenery.
 - The fresh 1080p check will run on the latest build after the driving and earlier browser sessions close.
 - Added distance-based scenery detail for high viewpoints. The detailed trees, fasteners, wires and insulators remain available close to the route and at platform zoom.
@@ -88,3 +88,8 @@ The first station-pair checkpoint is in progress. It still needs a validated ser
 
 - Drove the R40 in Chromium with the in-game autopilot off and switched through cab, chase and bird’s-eye view. After braking at Bulken and opening the doors, the HUD reported 74/100, a 2.1 m stopping error and arrival 34 seconds late.
 - Captured the bridge, tunnel and station at 1920 × 1080 in the same service. The run finished with zero browser console errors.
+
+## Offline network browser
+
+- F4, F5 and F6 loaded in Chromium with external requests blocked and zero console errors. The F4 run switched from the full network to the Stavanger platform scenery and retained the running Bergen service.
+- The first full `npm run verify` finished with one failed stage, the 1080p CPU proxy. The latest build's isolated complete run is in progress.

@@ -20,4 +20,6 @@ The [data rebuild output](data-rebuild.txt) records a full run of `npm run data`
 
 The [network clearance output](network-clearance.txt) records the production mesh audit for all 169 intercity tiles and the R40 checkpoint.
 
+The [offline network browser output](offline-network.txt) records WebGL2 startup for all three intercity routes and a Bird’s-eye jump from the F4 network view to the Stavanger platforms.
+
 The [pre-optimization cab sample](r40-timing-before-batching.txt) records the initial 1080p CPU proxy failure and render workload that led to terrain, forest and cab batching.
